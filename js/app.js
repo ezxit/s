@@ -346,7 +346,7 @@ async function renderView(gistId) {
         try {
           await api('DELETE', `${GIST_API}/${gistId}`);
           toast('已删除', Icons.check);
-          setTimeout(() => { location.href = '.'; }, 500);
+          setTimeout(() => { location.reload(); }, 500);
         } catch (err) { toast(err.message, Icons.alert); }
       };
     }
