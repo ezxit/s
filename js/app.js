@@ -6,6 +6,17 @@ const DATA_FILE = 'shortlink.json';
 let token = localStorage.getItem('gh_token') || '';
 let files = [];
 
+const THEMES = ['midnight', 'daylight', 'sepia', 'ocean', 'cherry'];
+
+function getTheme() {
+  return localStorage.getItem('theme') || 'midnight';
+}
+
+function setTheme(name) {
+  localStorage.setItem('theme', name);
+  document.documentElement.setAttribute('data-theme', name);
+}
+
 // --- helpers ---
 const $ = s => document.querySelector(s);
 const $$ = s => document.querySelectorAll(s);
@@ -94,9 +105,11 @@ function render() {
   const params = new URLSearchParams(location.search);
   const sid = params.get('s');
   const user = params.get('user');
+  const page = params.get('page');
 
   if (sid) return renderView(sid);
   if (user) return renderList(user);
+  if (page === 'settings' && token) return renderSettings();
   if (!token) return renderSetup();
   return renderHome();
 }
@@ -159,9 +172,9 @@ function renderHome() {
       <button class="btn btn-ghost" id="list-btn">
         ${Icons.list} 我的短链接
       </button>
-      <button class="btn btn-ghost" id="reset-token-btn" aria-label="重置 Token">
-        ${Icons.settings} 重置 Token
-      </button>
+      <a class="btn btn-ghost" href="?page=settings" style="text-decoration:none" aria-label="设置">
+        ${Icons.settings} 设置
+      </a>
     </div>
   `;
   files = [];
@@ -186,7 +199,6 @@ function bindHomeEvents() {
         .catch(() => toast('获取用户信息失败', Icons.alert));
     }
   };
-  $('#reset-token-btn').onclick = () => { localStorage.removeItem('gh_token'); token = ''; render(); };
 }
 
 function renderPreviews() {
@@ -422,5 +434,113 @@ async function renderList(username) {
   }
 }
 
+// -- settings page --
+const THEME_PREVIEWS = {
+  midnight: { dots: ['#0F172A','#1E293B','#22C55E'], label: '暗夜' },
+  daylight: { dots: ['#F8FAFC','#E2E8F0','#16A34A'], label: '日光' },
+  sepia:    { dots: ['#FDF6E3','#E6D5B8','#2E7D32'], label: '暖纸' },
+  ocean:    { dots: ['#0B192C','#1E3A5F','#06B6D4'], label: '海洋' },
+  cherry:   { dots: ['#1A0F14','#452632','#F472B6'], label: '樱桃' },
+};
+
+function renderSettings() {
+  const current = getTheme();
+
+  app.innerHTML = `
+    <div class="logo">${Icons.settings}<span>设置</span></div>
+    <div class="card fade-in">
+
+      <div class="settings-section">
+        <h3>GitHub Token</h3>
+        <div class="settings-token">
+          ${Icons.key}
+          <span>${maskToken(token)}</span>
+        </div>
+        <div class="flex spacer-sm">
+          <button class="btn-sm" id="change-token-btn">${Icons.settings} 更换</button>
+          <button class="btn-sm" id="clear-token-btn" style="color:var(--color-danger)">${Icons.trash} 清除</button>
+        </div>
+      </div>
+
+      <hr class="divider">
+
+      <div class="settings-section">
+        <h3>主题</h3>
+        <div class="theme-grid" id="theme-grid">
+          ${THEMES.map(t => `
+            <button class="theme-card ${t === current ? 'active' : ''}" data-theme="${t}" aria-label="${THEME_PREVIEWS[t].label} 主题" aria-pressed="${t === current}">
+              <div class="dot-group">
+                ${THEME_PREVIEWS[t].dots.map(c => `<span class="dot" style="background:${c}"></span>`).join('')}
+              </div>
+              <span class="swatch-name">${THEME_PREVIEWS[t].label}</span>
+            </button>
+          `).join('')}
+        </div>
+      </div>
+
+      <hr class="divider">
+
+      <div class="settings-section">
+        <h3>数据</h3>
+        <button class="btn-sm" id="clear-data-btn" style="color:var(--color-danger)">
+          ${Icons.alert} 清除全部本地数据
+        </button>
+      </div>
+
+      <hr class="divider">
+
+      <div class="settings-section">
+        <h3>关于</h3>
+        <p class="muted">shortlink — 基于 GitHub Gist 的短链接工具</p>
+        <p class="dim spacer-sm">数据存储在 GitHub Gist，Token 仅在浏览器 localStorage。</p>
+      </div>
+
+    </div>
+
+    <div class="settings-back">
+      <a class="btn btn-secondary" href=".">${Icons.arrowLeft} 返回首页</a>
+    </div>
+  `;
+
+  // theme switch
+  $$('.theme-card').forEach(card => {
+    card.onclick = () => {
+      const t = card.dataset.theme;
+      setTheme(t);
+      renderSettings();
+    };
+  });
+
+  // token actions
+  $('#change-token-btn').onclick = () => {
+    localStorage.removeItem('gh_token');
+    token = '';
+    render();
+  };
+
+  $('#clear-token-btn').onclick = () => {
+    if (confirm('确定清除 Token？之后需要重新设置。')) {
+      localStorage.removeItem('gh_token');
+      token = '';
+      render();
+    }
+  };
+
+  // clear all data
+  $('#clear-data-btn').onclick = () => {
+    if (confirm('确定清除全部本地数据？这将移除 Token 和主题设置。')) {
+      localStorage.clear();
+      token = '';
+      render();
+    }
+  };
+}
+
+function maskToken(t) {
+  if (t.length <= 8) return t;
+  return t.slice(0, 4) + '…'.repeat(8) + t.slice(-4);
+}
+
 // --- init ---
+document.documentElement.setAttribute('data-theme', getTheme());
 render();
