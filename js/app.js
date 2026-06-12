@@ -302,54 +302,198 @@ async function renderView(gistId) {
 
     const data = JSON.parse(file.content);
     const date = data.created ? data.created.slice(0, 16).replace('T', ' ') : '';
+    let editFiles = [];
 
-    let html = `
-      <div class="card fade-in">
-      <div class="view-meta">
-        ${Icons.link}
-        <span>s/</span><span class="gist-id">${esc(gistId)}</span>
-        <span>&middot;</span>
-        <span>${esc(date)}</span>
-      </div>
-    `;
+    function renderViewMode() {
+      let html = `
+        <div class="card fade-in">
+        <div class="view-meta">
+          ${Icons.link}
+          <span>s/</span><span class="gist-id">${esc(gistId)}</span>
+          <span>&middot;</span>
+          <span>${esc(date)}</span>
+        </div>
+      `;
 
-    if (data.text) {
-      html += `<div class="view-text">${esc(data.text)}</div>`;
+      if (data.text) html += `<div class="view-text">${esc(data.text)}</div>`;
+      if (data.images?.length) {
+        html += `<div class="view-images">`;
+        data.images.forEach((img, i) => {
+          html += `<a href="${img}" target="_blank" rel="noopener" aria-label="查看原图 ${i + 1}"><img src="${img}" alt="图片 ${i + 1}" loading="lazy"></a>`;
+        });
+        html += `</div>`;
+      }
+      if (!data.text && !data.images?.length) {
+        html += `<div class="empty-state"><p class="muted">没有内容</p></div>`;
+      }
+
+      html += `<div class="spacer view-actions">`;
+      html += `<a class="btn btn-secondary btn-sm" href=".">${Icons.arrowLeft} 创建新的</a>`;
+      if (token) {
+        html += `<button class="btn btn-ghost btn-sm" id="edit-btn">${Icons.settings} 编辑</button>`;
+        html += `<button class="btn btn-danger btn-sm" id="delete-link" aria-label="删除此短链接">${Icons.trash} 删除</button>`;
+      }
+      html += `</div></div>`;
+      app.innerHTML = html;
+      bindViewActions();
     }
 
-    if (data.images?.length) {
-      html += `<div class="view-images">`;
-      data.images.forEach((img, i) => {
-        html += `<a href="${img}" target="_blank" rel="noopener" aria-label="查看原图 ${i + 1}"><img src="${img}" alt="图片 ${i + 1}" loading="lazy"></a>`;
+    function renderEditMode() {
+      editFiles = [];
+      let html = `
+        <div class="card fade-in">
+        <div class="view-meta">
+          ${Icons.settings}
+          <span>编辑</span>
+          <span>&middot;</span>
+          <span class="gist-id">s/${esc(gistId).slice(0, 8)}</span>
+        </div>
+        <label class="input-label" for="edit-text">文字内容</label>
+        <textarea id="edit-text" placeholder="写点什么...">${esc(data.text || '')}</textarea>
+        <div class="flex spacer-sm">
+          <label class="file-label" for="edit-file-input" tabindex="0" aria-label="添加新图片">
+            ${Icons.image} 添加图片
+          </label>
+          <input type="file" id="edit-file-input" accept="image/*" multiple hidden>
+          <span class="muted" id="edit-img-count"></span>
+        </div>
+        <div class="previews" id="edit-previews"></div>
+      `;
+
+      if (data.images?.length) {
+        html += `<p class="dim spacer-sm">已有图片（点击删除）</p>`;
+        html += `<div class="previews" id="existing-previews">`;
+        data.images.forEach((img, i) => {
+          html += `
+            <div class="wrap edit-wrap" tabindex="0" data-idx="${i}" aria-label="删除已有图片 ${i + 1}">
+              <img src="${img}" alt="已有图片 ${i + 1}">
+              <button class="del" aria-label="删除图片">&times;</button>
+            </div>`;
+        });
+        html += `</div>`;
+      }
+
+      html += `<div class="flex spacer" style="gap:8px">`;
+      html += `<button class="btn btn-primary btn-sm" id="save-edit-btn">${Icons.check} 保存修改</button>`;
+      html += `<button class="btn btn-secondary btn-sm" id="cancel-edit-btn">取消</button>`;
+      html += `</div></div>`;
+      app.innerHTML = html;
+      bindEditActions();
+    }
+
+    function renderEditPreviews() {
+      const c = $('#edit-previews');
+      if (!c) return;
+      c.innerHTML = '';
+      const count = $('#edit-img-count');
+      if (count) count.textContent = editFiles.length ? `${editFiles.length} 张新图片` : '';
+      editFiles.forEach((f, i) => {
+        const r = new FileReader();
+        r.onload = e => {
+          const wrap = document.createElement('div');
+          wrap.className = 'wrap';
+          wrap.setAttribute('tabindex', '0');
+          wrap.setAttribute('aria-label', `新图片 ${i + 1}，点击删除`);
+          wrap.innerHTML = `<img src="${e.target.result}" alt="新图片 ${i + 1}"><button class="del" aria-label="删除图片">&times;</button>`;
+          wrap.querySelector('.del').onclick = ev => { ev.stopPropagation(); editFiles.splice(i, 1); renderEditPreviews(); };
+          wrap.onclick = () => { editFiles.splice(i, 1); renderEditPreviews(); };
+          c.appendChild(wrap);
+        };
+        r.readAsDataURL(f);
       });
-      html += `</div>`;
     }
 
-    if (!data.text && !data.images?.length) {
-      html += `<div class="empty-state"><p class="muted">没有内容</p></div>`;
-    }
+    function bindEditActions() {
+      const efi = $('#edit-file-input');
+      if (efi) {
+        efi.onchange = () => {
+          editFiles.push(...efi.files);
+          efi.value = '';
+          renderEditPreviews();
+        };
+      }
 
-    html += `<div class="spacer view-actions">`;
-    html += `<a class="btn btn-secondary btn-sm" href=".">${Icons.arrowLeft} 创建新的</a>`;
-    if (token) {
-      html += `<button class="btn btn-danger btn-sm" id="delete-link" aria-label="删除此短链接">${Icons.trash} 删除</button>`;
-    }
-    html += `</div></div>`;
+      // remove existing image
+      $$('#existing-previews .edit-wrap').forEach(wrap => {
+        wrap.onclick = () => {
+          const idx = parseInt(wrap.dataset.idx);
+          data.images.splice(idx, 1);
+          renderEditMode();
+        };
+      });
 
-    app.innerHTML = html;
+      $('#save-edit-btn').onclick = async () => {
+        const btn = $('#save-edit-btn');
+        btn.disabled = true;
+        btn.innerHTML = `<span class="spinner"></span> 保存中...`;
 
-    const del = $('#delete-link');
-    if (del) {
-      del.onclick = async e => {
-        e.preventDefault();
-        if (!confirm('确定删除这个短链接？')) return;
         try {
-          await api('DELETE', `${GIST_API}/${gistId}`);
-          toast('已删除', Icons.check);
-          setTimeout(() => { location.reload(); }, 500);
-        } catch (err) { toast(err.message, Icons.alert); }
+          const textVal = $('#edit-text').value.trim();
+          if (!textVal && !data.images?.length && !editFiles.length) {
+            btn.disabled = false;
+            btn.innerHTML = `${Icons.check} 保存修改`;
+            return toast('至少需要文字或图片', Icons.alert);
+          }
+
+          const newImages = editFiles.length ? await Promise.all(editFiles.map(compressImage)) : [];
+          data.text = textVal;
+          if (newImages.length) data.images = [...(data.images || []), ...newImages];
+
+          const gistDesc = textVal ? textVal.slice(0, 60).replace(/\n/g, ' ') : (data.images?.length ? `[${data.images.length} images]` : '');
+
+          await api('PATCH', `${GIST_API}/${gistId}`, {
+            description: `[sl] ${gistDesc}`,
+            files: { [DATA_FILE]: { content: JSON.stringify(data) } }
+          });
+
+          toast('已保存', Icons.check);
+          renderViewMode();
+        } catch (err) {
+          toast(err.message, Icons.alert);
+        }
+        btn.disabled = false;
+        btn.innerHTML = `${Icons.check} 保存修改`;
       };
+
+      $('#cancel-edit-btn').onclick = () => renderViewMode();
     }
+
+    function bindViewActions() {
+      $('#edit-btn').onclick = () => renderEditMode();
+      const del = $('#delete-link');
+      if (del) {
+        del.onclick = async e => {
+          e.preventDefault();
+          if (!confirm('确定删除这个短链接？')) return;
+          try {
+            await api('DELETE', `${GIST_API}/${gistId}`);
+            app.innerHTML = `
+              <div class="card fade-in">
+                <div class="empty-state">
+                  ${Icons.check}
+                  <p style="font-weight:600;color:var(--color-text)">已删除</p>
+                  <p class="muted">s/${esc(gistId).slice(0, 12)} 已被永久删除</p>
+                  <div class="flex" style="justify-content:center;flex-wrap:wrap">
+                    <a class="btn btn-secondary btn-sm" href=".">${Icons.arrowLeft} 创建新的</a>
+                    ${token ? `<button class="btn btn-ghost btn-sm" id="goto-list-btn">${Icons.list} 我的短链接</button>` : ''}
+                  </div>
+                </div>
+              </div>
+            `;
+            if (token) {
+              $('#goto-list-btn').onclick = () => {
+                fetch('https://api.github.com/user', { headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.github+json' } })
+                  .then(r => r.json())
+                  .then(u => { location.search = '?user=' + u.login; })
+                  .catch(() => toast('获取用户信息失败', Icons.alert));
+              };
+            }
+          } catch (err) { toast(err.message, Icons.alert); }
+        };
+      }
+    }
+
+    renderViewMode();
   } catch (err) {
     app.innerHTML = `
       <div class="card fade-in">
@@ -386,6 +530,11 @@ async function renderList(username) {
   try {
     const gists = await api('GET', `https://api.github.com/users/${username}/gists?per_page=100`);
     const items = gists.filter(g => g.files?.[DATA_FILE]);
+    const itemData = items.map(g => ({
+      id: g.id,
+      desc: (g.description || '').replace(/^\[sl\]\s*/, ''),
+      date: g.created_at ? g.created_at.slice(0, 10) : ''
+    }));
 
     if (!items.length) {
       app.innerHTML = `
@@ -400,28 +549,48 @@ async function renderList(username) {
       return;
     }
 
+    const searchIcon = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>`;
+
+    function renderListItems(filterText) {
+      const q = (filterText || '').toLowerCase();
+      const filtered = q ? itemData.filter(d => d.desc.toLowerCase().includes(q)) : itemData;
+      if (!filtered.length) {
+        return `<div class="empty-state" style="padding:24px 4px"><p>没有匹配 "${esc(q)}" 的短链接</p></div>`;
+      }
+      let h = `<ul class="shortlist">`;
+      filtered.forEach(g => {
+        const preview = g.desc || '(空)';
+        h += `
+          <li>
+            <span class="code">${esc(g.id).slice(0, 8)}</span>
+            <div class="shortlist-info">
+              <span class="preview-text">${esc(preview)}</span>
+              <span class="date">${esc(g.date)}</span>
+            </div>
+            <a class="btn-sm" href="?s=${esc(g.id)}" style="text-decoration:none;flex-shrink:0">查看 ${Icons.externalLink}</a>
+          </li>`;
+      });
+      h += `</ul>`;
+      h += `<p class="dim spacer-sm">${filtered.length} / ${itemData.length} 条</p>`;
+      return h;
+    }
+
     let html = `
       <div class="logo">${Icons.link}<span>${esc(username)} 的短链接</span></div>
       <div class="card fade-in">
-      <ul class="shortlist">`;
-    items.forEach(g => {
-      const desc = (g.description || '').replace(/^\[sl\]\s*/, '');
-      const preview = desc || '(空)';
-      const date = g.created_at ? g.created_at.slice(0, 10) : '';
-      html += `
-        <li>
-          <span class="code">${esc(g.id).slice(0, 8)}</span>
-          <div class="shortlist-info">
-            <span class="preview-text">${esc(preview)}</span>
-            <span class="date">${esc(date)}</span>
-          </div>
-          <a class="btn-sm" href="?s=${esc(g.id)}" style="text-decoration:none;flex-shrink:0">查看 ${Icons.externalLink}</a>
-        </li>`;
-    });
-    html += `</ul>`;
-    html += `<div class="spacer"><a class="link" href=".">${Icons.arrowLeft} 创建新的</a></div></div>`;
+        <div class="search-bar">
+          ${searchIcon}
+          <input type="search" id="list-search" class="search-input" placeholder="搜索 ${itemData.length} 条短链接..." autocomplete="off">
+        </div>
+        <div id="list-items">${renderListItems('')}</div>
+      </div>
+      <div class="spacer"><a class="link" href=".">${Icons.arrowLeft} 创建新的</a></div>`;
 
     app.innerHTML = html;
+
+    $('#list-search').oninput = function() {
+      $('#list-items').innerHTML = renderListItems(this.value);
+    };
   } catch (err) {
     app.innerHTML = `
       <div class="card fade-in">
@@ -544,3 +713,19 @@ function maskToken(t) {
 // --- init ---
 document.documentElement.setAttribute('data-theme', getTheme());
 render();
+
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  // close result card on home page
+  const result = $('#result');
+  if (result && result.style.display !== 'none') {
+    result.style.display = 'none';
+    return;
+  }
+  // cancel edit mode on view page
+  const cancelBtn = $('#cancel-edit-btn');
+  if (cancelBtn) {
+    cancelBtn.click();
+    return;
+  }
+});
