@@ -71,7 +71,9 @@ async function api(method, url, body) {
     }
     throw new Error(msg);
   }
-  return res.json();
+  const text = await res.text();
+  if (!text) return null;
+  return JSON.parse(text);
 }
 
 // --- image compression ---
@@ -246,14 +248,20 @@ async function createShortlink() {
       return toast('至少写点文字或传张图片', Icons.alert);
     }
     const images = await Promise.all(files.map(compressImage));
+    const imageNames = images.map((_, i) => `img_${i}.jpg`);
 
-    const data = { text, images, created: new Date().toISOString() };
-    const preview = text ? text.slice(0, 60).replace(/\n/g, ' ') : (images.length ? `[${images.length} images]` : '');
+    const data = { text, images: imageNames, created: new Date().toISOString() };
+    const preview = text ? text.slice(0, 60).replace(/\n/g, ' ') : (imageNames.length ? `[${imageNames.length} images]` : '');
+
+    const gistFiles = { [DATA_FILE]: { content: JSON.stringify(data) } };
+    images.forEach((dataUrl, i) => {
+      gistFiles[imageNames[i]] = { content: dataUrl.split(',')[1] };
+    });
 
     const gist = await api('POST', GIST_API, {
       description: `[sl] ${preview}`,
       public: true,
-      files: { [DATA_FILE]: { content: JSON.stringify(data) } }
+      files: gistFiles
     });
 
     const url = `${location.origin}${location.pathname}?s=${gist.id}`;
@@ -304,6 +312,13 @@ async function renderView(gistId) {
     const date = data.created ? data.created.slice(0, 16).replace('T', ' ') : '';
     let editFiles = [];
 
+    function imgUrl(img) {
+      if (!img) return '';
+      if (img.startsWith('data:')) return img; // legacy base64
+      const f = gist.files?.[img];
+      return f?.raw_url || `https://gist.githubusercontent.com/${gist.owner?.login || 'anonymous'}/${gistId}/raw/${img}`;
+    }
+
     function renderViewMode() {
       let html = `
         <div class="card fade-in">
@@ -319,7 +334,8 @@ async function renderView(gistId) {
       if (data.images?.length) {
         html += `<div class="view-images">`;
         data.images.forEach((img, i) => {
-          html += `<a href="${img}" target="_blank" rel="noopener" aria-label="查看原图 ${i + 1}"><img src="${img}" alt="图片 ${i + 1}" loading="lazy"></a>`;
+          const src = imgUrl(img);
+          html += `<a href="${src}" target="_blank" rel="noopener" aria-label="查看原图 ${i + 1}"><img src="${src}" alt="图片 ${i + 1}" loading="lazy"></a>`;
         });
         html += `</div>`;
       }
@@ -365,8 +381,8 @@ async function renderView(gistId) {
         html += `<div class="previews" id="existing-previews">`;
         data.images.forEach((img, i) => {
           html += `
-            <div class="wrap edit-wrap" tabindex="0" data-idx="${i}" aria-label="删除已有图片 ${i + 1}">
-              <img src="${img}" alt="已有图片 ${i + 1}">
+            <div class="wrap edit-wrap" tabindex="0" data-idx="${i}" data-fname="${esc(img)}" aria-label="删除已有图片 ${i + 1}">
+              <img src="${imgUrl(img)}" alt="已有图片 ${i + 1}">
               <button class="del" aria-label="删除图片">&times;</button>
             </div>`;
         });
@@ -436,14 +452,27 @@ async function renderView(gistId) {
           }
 
           const newImages = editFiles.length ? await Promise.all(editFiles.map(compressImage)) : [];
+          // determine next image index
+          let nextIdx = 0;
+          (data.images || []).forEach(fname => {
+            const m = fname.match(/^img_(\d+)\.jpg$/);
+            if (m) nextIdx = Math.max(nextIdx, parseInt(m[1]) + 1);
+          });
+          const newNames = newImages.map((_, i) => `img_${nextIdx + i}.jpg`);
+
           data.text = textVal;
-          if (newImages.length) data.images = [...(data.images || []), ...newImages];
+          data.images = [...(data.images || []), ...newNames];
 
           const gistDesc = textVal ? textVal.slice(0, 60).replace(/\n/g, ' ') : (data.images?.length ? `[${data.images.length} images]` : '');
 
+          const files = { [DATA_FILE]: { content: JSON.stringify(data) } };
+          newImages.forEach((dataUrl, i) => {
+            files[newNames[i]] = { content: dataUrl.split(',')[1] };
+          });
+
           await api('PATCH', `${GIST_API}/${gistId}`, {
             description: `[sl] ${gistDesc}`,
-            files: { [DATA_FILE]: { content: JSON.stringify(data) } }
+            files
           });
 
           toast('已保存', Icons.check);
@@ -550,6 +579,7 @@ async function renderList(username) {
     }
 
     const searchIcon = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>`;
+    const checked = new Set();
 
     function renderListItems(filterText) {
       const q = (filterText || '').toLowerCase();
@@ -560,14 +590,19 @@ async function renderList(username) {
       let h = `<ul class="shortlist">`;
       filtered.forEach(g => {
         const preview = g.desc || '(空)';
+        const cid = g.id;
         h += `
           <li>
-            <span class="code">${esc(g.id).slice(0, 8)}</span>
+            <label class="list-check" aria-label="选择 ${esc(preview)}">
+              <input type="checkbox" class="list-cb" value="${esc(cid)}" ${checked.has(cid) ? 'checked' : ''}>
+              <span class="checkmark"></span>
+            </label>
             <div class="shortlist-info">
+              <span class="code">${esc(cid).slice(0, 8)}</span>
               <span class="preview-text">${esc(preview)}</span>
               <span class="date">${esc(g.date)}</span>
             </div>
-            <a class="btn-sm" href="?s=${esc(g.id)}" style="text-decoration:none;flex-shrink:0">查看 ${Icons.externalLink}</a>
+            <a class="btn-sm" href="?s=${esc(cid)}" style="text-decoration:none;flex-shrink:0">查看 ${Icons.externalLink}</a>
           </li>`;
       });
       h += `</ul>`;
@@ -575,9 +610,39 @@ async function renderList(username) {
       return h;
     }
 
+    function updateBatchBar() {
+      const bar = $('#batch-bar');
+      const count = $('#batch-count');
+      if (!bar || !count) return;
+      if (checked.size > 0) {
+        bar.style.display = 'flex';
+        count.textContent = checked.size;
+      } else {
+        bar.style.display = 'none';
+      }
+    }
+
+    function bindListCheckboxes() {
+      $$('.list-cb').forEach(cb => {
+        cb.onchange = () => {
+          if (cb.checked) checked.add(cb.value);
+          else checked.delete(cb.value);
+          updateBatchBar();
+        };
+      });
+    }
+
     let html = `
       <div class="logo">${Icons.link}<span>${esc(username)} 的短链接</span></div>
       <div class="card fade-in">
+        <div class="batch-bar" id="batch-bar" style="display:none">
+          <label class="list-check" aria-label="全选" style="margin-right:4px">
+            <input type="checkbox" id="select-all">
+            <span class="checkmark"></span>
+          </label>
+          <span class="muted">已选 <strong id="batch-count">0</strong> 条</span>
+          <button class="btn-sm" id="batch-delete-btn" style="color:var(--color-danger);margin-left:auto">${Icons.trash} 批量删除</button>
+        </div>
         <div class="search-bar">
           ${searchIcon}
           <input type="search" id="list-search" class="search-input" placeholder="搜索 ${itemData.length} 条短链接..." autocomplete="off">
@@ -588,8 +653,36 @@ async function renderList(username) {
 
     app.innerHTML = html;
 
+    bindListCheckboxes();
+
+    $('#select-all').onchange = function() {
+      $$('.list-cb').forEach(cb => {
+        cb.checked = this.checked;
+        if (this.checked) checked.add(cb.value);
+        else checked.delete(cb.value);
+      });
+      updateBatchBar();
+    };
+
     $('#list-search').oninput = function() {
       $('#list-items').innerHTML = renderListItems(this.value);
+      bindListCheckboxes();
+      updateBatchBar();
+    };
+
+    $('#batch-delete-btn').onclick = async () => {
+      if (!confirm(`确定删除选中的 ${checked.size} 条短链接？此操作不可撤销。`)) return;
+      const btn = $('#batch-delete-btn');
+      btn.disabled = true;
+      const ids = [...checked];
+      let done = 0;
+      for (const id of ids) {
+        btn.innerHTML = `${Icons.trash} 删除中 ${done + 1}/${ids.length}...`;
+        try { await api('DELETE', `${GIST_API}/${id}`); } catch (e) { /* continue */ }
+        done++;
+      }
+      toast(`已删除 ${done} 条`, Icons.check);
+      setTimeout(() => renderList(username), 600);
     };
   } catch (err) {
     app.innerHTML = `
