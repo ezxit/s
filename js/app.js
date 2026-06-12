@@ -4,7 +4,7 @@ const DATA_FILE = 'shortlink.json';
 
 // --- state ---
 let token = localStorage.getItem('gh_token') || '';
-let files = []; // File objects for upload
+let files = [];
 
 // --- helpers ---
 const $ = s => document.querySelector(s);
@@ -22,14 +22,22 @@ function toast(msg) {
 
 async function api(method, url, body) {
   const headers = { 'Accept': 'application/vnd.github+json' };
-  if (token) headers['Authorization'] = `token ${token}`;
+  if (token) headers['Authorization'] = `Bearer ${token}`;
   const opts = { method, headers };
-  if (body) { headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
+  if (body) {
+    headers['Content-Type'] = 'application/json';
+    opts.body = JSON.stringify(body);
+  }
   const res = await fetch(url, opts);
   if (!res.ok) {
-    const msg = res.status === 401 ? 'Token 无效，请重新设置' :
-                res.status === 403 ? 'API 限流，等一分钟再试' :
-                `请求失败 (${res.status})`;
+    const text = await res.text();
+    let msg;
+    try {
+      const j = JSON.parse(text);
+      msg = j.message || `请求失败 (${res.status})`;
+    } catch {
+      msg = `请求失败 (${res.status})`;
+    }
     throw new Error(msg);
   }
   return res.json();
@@ -80,19 +88,19 @@ function renderSetup() {
       <div class="logo">🔗 shortlink</div>
       <h2>设置 GitHub Token</h2>
       <p>需要一个 <code>gist</code> 权限的 token 来创建短链接。<br>
-      去 <a class="link" href="https://github.com/settings/tokens/new?scopes=gist&description=shortlink" target="_blank">GitHub → Settings → Tokens</a> 创建一个，粘贴到下面。</p>
-      <input id="token-input" type="password" placeholder="ghp_xxxxxxxxxxxxxxxxxxxx" style="margin-bottom:12px">
+      去 <a class="link" href="https://github.com/settings/tokens/new?scopes=gist&description=shortlink" target="_blank">GitHub &rarr; Settings &rarr; Tokens</a> 创建一个，粘贴到下面。</p>
+      <input id="token-input" type="password" placeholder="github_pat_xxxxxxxxxxxxxxxxxxxx" style="margin-bottom:12px">
       <button class="btn btn-primary" id="save-token" style="width:100%">保存</button>
-      <p class="muted spacer-sm" style="font-size:0.8rem">Token 只存你浏览器里，不会上传到任何地方。</p>
+      <p class="muted spacer-sm" style="font-size:0.8rem">Token 只存在你浏览器里，不会上传到任何地方。</p>
     </div>
   `;
   $('#save-token').onclick = () => {
     token = $('#token-input').value.trim();
-    if (!token.startsWith('ghp_') && !token.startsWith('github_pat_')) {
-      return toast('格式不对，Token 应该以 ghp_ 或 github_pat_ 开头');
+    if (token.length < 10) {
+      return toast('Token 太短了，检查一下是否粘贴完整');
     }
     localStorage.setItem('gh_token', token);
-    toast('搞定 ✅');
+    toast('保存成功 ✨');
     render();
   };
 }
@@ -110,7 +118,7 @@ const homeHTML = `
     <div class="previews" id="previews"></div>
     <button class="btn btn-primary spacer" id="create-btn" style="width:100%">创建短链接</button>
     <div class="result spacer" id="result">
-      <span class="muted">创建成功 ✅</span><br>
+      <span class="muted">创建成功 ✨</span><br>
       <a class="result-url" id="result-url" href="" target="_blank"></a>
       <div class="flex spacer-sm">
         <button class="btn-sm" id="copy-btn">复制</button>
@@ -142,8 +150,7 @@ function bindHomeEvents() {
   $('#create-btn').onclick = createShortlink;
   $('#list-btn').onclick = () => {
     if (token) {
-      // get authenticated user
-      fetch('https://api.github.com/user', { headers: { 'Authorization': `token ${token}`, 'Accept': 'application/vnd.github+json' } })
+      fetch('https://api.github.com/user', { headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/vnd.github+json' } })
         .then(r => r.json())
         .then(u => { location.search = '?user=' + u.login; })
         .catch(() => toast('获取用户信息失败'));
@@ -163,7 +170,7 @@ function renderPreviews() {
     r.onload = e => {
       const wrap = document.createElement('div');
       wrap.className = 'wrap';
-      wrap.innerHTML = `<img src="${e.target.result}"><div class="del">×</div>`;
+      wrap.innerHTML = `<img src="${e.target.result}"><div class="del">&times;</div>`;
       wrap.querySelector('.del').onclick = ev => { ev.stopPropagation(); files.splice(i, 1); renderPreviews(); };
       container.appendChild(wrap);
     };
@@ -207,6 +214,7 @@ async function createShortlink() {
     $('#new-btn').onclick = () => { $('#result').style.display = 'none'; };
   } catch (err) {
     toast(err.message);
+    console.error(err);
   }
   btn.disabled = false;
   btn.textContent = '创建短链接';
@@ -219,14 +227,14 @@ async function renderView(gistId) {
   try {
     const gist = await api('GET', `${GIST_API}/${gistId}`);
     const file = gist.files?.[DATA_FILE];
-    if (!file) return (app.innerHTML = `<div class="card"><p>内容不存在</p><a class="link" href=".">← 返回</a></div>`);
+    if (!file) return (app.innerHTML = `<div class="card"><p>内容不存在</p><a class="link" href=".">&larr; 返回</a></div>`);
 
     const data = JSON.parse(file.content);
     const date = data.created ? data.created.slice(0, 16) : '';
 
     let html = `
       <div class="card">
-      <div class="view-meta">🔗 s/<strong>${esc(gistId)}</strong> · ${esc(date)}</div>
+      <div class="view-meta">🔗 s/<strong>${esc(gistId)}</strong> &middot; ${esc(date)}</div>
     `;
 
     if (data.text) {
@@ -245,9 +253,9 @@ async function renderView(gistId) {
       html += `<p class="muted">没有内容</p>`;
     }
 
-    html += `<div class="spacer"><a class="link" href=".">← 创建新的</a>`;
+    html += `<div class="spacer"><a class="link" href=".">&larr; 创建新的</a>`;
     if (token) {
-      html += ` · <a class="link" href="#" id="delete-link" style="color:var(--danger)">删除</a>`;
+      html += ` &middot; <a class="link" href="#" id="delete-link" style="color:var(--danger)">删除</a>`;
     }
     html += `</div></div>`;
 
@@ -266,7 +274,7 @@ async function renderView(gistId) {
       };
     }
   } catch (err) {
-    app.innerHTML = `<div class="card"><p>${esc(err.message)}</p><a class="link spacer" href=".">← 返回</a></div>`;
+    app.innerHTML = `<div class="card"><p>${esc(err.message)}</p><a class="link spacer" href=".">&larr; 返回</a></div>`;
   }
 }
 
@@ -291,18 +299,18 @@ async function renderList(username) {
         html += `
           <li>
             <span class="code">${esc(g.id).slice(0, 8)}</span>
-            <span class="preview-text">${esc(preview)} · ${esc(date)}</span>
+            <span class="preview-text">${esc(preview)} &middot; ${esc(date)}</span>
             <a class="btn-sm" href="?s=${esc(g.id)}" style="text-decoration:none;flex-shrink:0">查看</a>
           </li>`;
       });
       html += `</ul>`;
     }
 
-    html += `<div class="spacer"><a class="link" href=".">← 创建新的</a></div></div>`;
+    html += `<div class="spacer"><a class="link" href=".">&larr; 创建新的</a></div></div>`;
 
     app.innerHTML = html;
   } catch (err) {
-    app.innerHTML = `<div class="card"><p>${esc(err.message)}</p><a class="link spacer" href=".">← 返回</a></div>`;
+    app.innerHTML = `<div class="card"><p>${esc(err.message)}</p><a class="link spacer" href=".">&larr; 返回</a></div>`;
   }
 }
 
