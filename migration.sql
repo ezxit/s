@@ -46,9 +46,11 @@ NOTIFY pgrst, 'reload schema';
 -- ============================================================
 -- Storage bucket for file uploads
 -- ============================================================
-INSERT INTO storage.buckets (id, name, public)
-VALUES ('files', 'files', true)
-ON CONFLICT (id) DO UPDATE SET public = EXCLUDED.public;
+INSERT INTO storage.buckets (id, name, public, file_size_limit)
+VALUES ('files', 'files', true, 209715200)
+ON CONFLICT (id) DO UPDATE SET
+  public = EXCLUDED.public,
+  file_size_limit = EXCLUDED.file_size_limit;
 
 DO $$
 BEGIN

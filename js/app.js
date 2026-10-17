@@ -1,5 +1,5 @@
 // --- config ---
-const APP_VERSION = '1.4.1';
+const APP_VERSION = '1.4.2';
 const SUPABASE_URL = (localStorage.getItem('sb_url') || 'https://vhifkvzmujbhcdwjixdj.supabase.co').replace(/\/+$/, '');
 const SUPABASE_ANON_KEY = localStorage.getItem('sb_anon_key') || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZoaWZrdnptdWpiaGNkd2ppeGRqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE0ODgzOTYsImV4cCI6MjA5NzA2NDM5Nn0.nZ7zBk3p_Fh5Q88makO5OmHJFCJ2uG_0inIZ8kmq-zc';
 const configured = !!(SUPABASE_URL && SUPABASE_ANON_KEY);
@@ -143,6 +143,8 @@ function formatSize(bytes) {
 
 // --- Supabase Storage helpers ---
 const STORAGE_BUCKET = 'files';
+const MAX_ATTACHMENT_SIZE = 200 * 1024 * 1024;
+const MAX_ATTACHMENT_SIZE_LABEL = '200 MB';
 
 function supabaseHeaders(key = SUPABASE_ANON_KEY) {
   const headers = { apikey: key };
@@ -210,6 +212,10 @@ async function cleanUploadedFiles(entries) {
 }
 
 async function uploadAttachments(selectedFiles, onProgress) {
+  const oversized = selectedFiles.filter(file => file.size > MAX_ATTACHMENT_SIZE);
+  if (oversized.length) {
+    throw new Error(`${oversized.map(file => file.name).join(', ')} 超过 ${MAX_ATTACHMENT_SIZE_LABEL} 限制`);
+  }
   const entries = [];
   try {
     onProgress(0, selectedFiles.length);
@@ -375,7 +381,7 @@ function renderHome() {
       <div class="previews" id="previews"></div>
 
       <hr class="divider">
-      <label class="input-label">文件附件</label>
+      <label class="input-label">文件附件（单个最大 200 MB）</label>
       <div class="flex">
         <label class="file-label" for="upload-file-input" tabindex="0" aria-label="上传文件">
           ${Icons.upload} 选择文件
@@ -449,10 +455,9 @@ function bindHomeEvents() {
 
   const ufi = $('#upload-file-input');
   ufi.onchange = () => {
-    const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50MB
     const oversized = [];
     for (const f of ufi.files) {
-      if (f.size > MAX_FILE_SIZE) {
+      if (f.size > MAX_ATTACHMENT_SIZE) {
         oversized.push(f.name);
       } else {
         uploadFiles.push(f);
@@ -460,7 +465,7 @@ function bindHomeEvents() {
     }
     ufi.value = '';
     if (oversized.length) {
-      toast(`${oversized.join(', ')} 超过 50MB 限制，已跳过`, Icons.alert);
+      toast(`${oversized.join(', ')} 超过 ${MAX_ATTACHMENT_SIZE_LABEL} 限制，已跳过`, Icons.alert);
     }
     renderUploadPreviews();
   };
@@ -726,7 +731,7 @@ async function renderView(linkId) {
         <div class="previews" id="edit-previews"></div>
 
         <hr class="divider">
-        <label class="input-label">文件附件</label>
+        <label class="input-label">文件附件（单个最大 200 MB）</label>
         <div class="flex">
           <label class="file-label" for="edit-upload-file-input" tabindex="0" aria-label="上传新文件">
             ${Icons.upload} 添加文件
@@ -794,10 +799,9 @@ async function renderView(linkId) {
       const eufi = $('#edit-upload-file-input');
       if (eufi) {
         eufi.onchange = () => {
-          const MAX_FILE_SIZE = 50 * 1024 * 1024;
           const oversized = [];
           for (const f of eufi.files) {
-            if (f.size > MAX_FILE_SIZE) {
+            if (f.size > MAX_ATTACHMENT_SIZE) {
               oversized.push(f.name);
             } else {
               newEditUploadFiles.push(f);
@@ -805,7 +809,7 @@ async function renderView(linkId) {
           }
           eufi.value = '';
           if (oversized.length) {
-            toast(`${oversized.join(', ')} 超过 50MB 限制，已跳过`, Icons.alert);
+            toast(`${oversized.join(', ')} 超过 ${MAX_ATTACHMENT_SIZE_LABEL} 限制，已跳过`, Icons.alert);
           }
           renderEditUploadPreviews();
         };
