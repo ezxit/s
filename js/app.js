@@ -1,13 +1,11 @@
 // --- config ---
-const SUPABASE_URL = localStorage.getItem('sb_url') || 'https://vhifkvzmujbhcdwjixdj.supabase.co';
+const APP_VERSION = '1.4.1';
+const SUPABASE_URL = (localStorage.getItem('sb_url') || 'https://vhifkvzmujbhcdwjixdj.supabase.co').replace(/\/+$/, '');
 const SUPABASE_ANON_KEY = localStorage.getItem('sb_anon_key') || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZoaWZrdnptdWpiaGNkd2ppeGRqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE0ODgzOTYsImV4cCI6MjA5NzA2NDM5Nn0.nZ7zBk3p_Fh5Q88makO5OmHJFCJ2uG_0inIZ8kmq-zc';
 const configured = !!(SUPABASE_URL && SUPABASE_ANON_KEY);
 
 async function sb(path, method, body) {
-  const headers = {
-    'apikey': SUPABASE_ANON_KEY,
-    'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-  };
+  const headers = supabaseHeaders();
   if (body) headers['Content-Type'] = 'application/json';
   if (method === 'POST') headers['Prefer'] = 'return=representation';
   const opts = { method, headers };
@@ -18,6 +16,7 @@ async function sb(path, method, body) {
     let msg;
     try { msg = JSON.parse(text).message || `请求失败 (${res.status})`; }
     catch { msg = `请求失败 (${res.status})`; }
+    if (/column.*does not exist|could not find.*column/i.test(msg)) msg = '数据表缺少字段，请在 Supabase SQL Editor 运行 migration.sql';
     throw new Error(msg);
   }
   if (res.status === 204) return null;
@@ -46,8 +45,8 @@ function getViewCount(gistId) {
 }
 
 // --- optimistic cache (bridges eventual-consistency gaps after mutations) ---
-const OPTI_CREATES_KEY = 'opti_creates';
-const OPTI_DELETES_KEY = 'opti_deletes';
+const OPTI_CREATES_KEY = `opti_creates:${SUPABASE_URL}:${namespace}`;
+const OPTI_DELETES_KEY = `opti_deletes:${SUPABASE_URL}:${namespace}`;
 const OPTI_MAX_AGE_MS = 10 * 60 * 1000;
 
 function loadOptiCreates() {
@@ -81,11 +80,11 @@ function cleanOptiState(apiIds) {
   saveOptiDeletes(deletes);
 }
 
-const THEMES = ['auto', 'midnight', 'daylight', 'sepia', 'ocean', 'cherry'];
+const THEMES = ['auto', 'daylight', 'midnight', 'sepia', 'ocean', 'cherry'];
 
 function getTheme() {
   const t = localStorage.getItem('theme') || 'auto';
-  return t === 'auto' ? resolveAuto() : t;
+  return THEMES.includes(t) ? t : 'auto';
 }
 
 function resolveAuto() {
@@ -109,6 +108,8 @@ const esc = s => s.replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','
 
 // --- SVG icons (Lucide-style, stroke-based) ---
 const Icons = {
+  eye: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>`,
+  eyeOff: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 20C5 20 1 12 1 12a21.77 21.77 0 0 1 5.06-5.94M9.9 4.24A10.86 10.86 0 0 1 12 4c7 0 11 8 11 8a21.8 21.8 0 0 1-3.17 4.19M14.12 14.12a3 3 0 0 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>`,
   link: `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>`,
   plus: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>`,
   image: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>`,
@@ -143,24 +144,41 @@ function formatSize(bytes) {
 // --- Supabase Storage helpers ---
 const STORAGE_BUCKET = 'files';
 
+function supabaseHeaders(key = SUPABASE_ANON_KEY) {
+  const headers = { apikey: key };
+  if (!key.startsWith('sb_publishable_')) headers.Authorization = `Bearer ${key}`;
+  return headers;
+}
+
+function storageObjectPath(path) {
+  return `${STORAGE_BUCKET}/${path.split('/').map(encodeURIComponent).join('/')}`;
+}
+
+function newStoragePath(file) {
+  const folder = Array.from(new TextEncoder().encode(namespace), byte => byte.toString(16).padStart(2, '0')).join('');
+  const name = file.name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(-100) || 'file';
+  return `ns-${folder}/${crypto.randomUUID()}_${name}`;
+}
+
 async function sbStorageUpload(file, path) {
-  const formData = new FormData();
-  formData.append('file', file);
   const res = await fetch(
-    `${SUPABASE_URL}/storage/v1/object/${STORAGE_BUCKET}/${path}`,
+    `${SUPABASE_URL}/storage/v1/object/${storageObjectPath(path)}`,
     {
       method: 'POST',
       headers: {
-        'apikey': SUPABASE_ANON_KEY,
-        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+        ...supabaseHeaders(),
+        'Content-Type': file.type || 'application/octet-stream',
       },
-      body: formData,
+      body: file,
     }
   );
   if (!res.ok) {
     const text = await res.text();
     let msg;
-    try { msg = JSON.parse(text).message || text; } catch { msg = text; }
+    try { const error = JSON.parse(text); msg = error.message || error.error || text; } catch { msg = text; }
+    if (/bucket.*not found/i.test(msg)) msg = '缺少 files 存储桶，请在 Supabase SQL Editor 运行 migration.sql';
+    else if (/row.level security|permission denied|unauthorized/i.test(msg) || res.status === 403) msg = '存储权限不足，请在 Supabase SQL Editor 运行 migration.sql';
+    else if (res.status === 413) msg = '文件超出 Supabase 存储桶的大小限制';
     throw new Error(`上传失败: ${msg}`);
   }
   return res.json();
@@ -168,13 +186,11 @@ async function sbStorageUpload(file, path) {
 
 async function sbStorageDelete(path) {
   const res = await fetch(
-    `${SUPABASE_URL}/storage/v1/object/${STORAGE_BUCKET}/${path}`,
+    `${SUPABASE_URL}/storage/v1/object/${STORAGE_BUCKET}`,
     {
       method: 'DELETE',
-      headers: {
-        'apikey': SUPABASE_ANON_KEY,
-        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
-      },
+      headers: { ...supabaseHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify({ prefixes: [path] }),
     }
   );
   if (!res.ok) {
@@ -186,7 +202,82 @@ async function sbStorageDelete(path) {
 }
 
 function sbStoragePublicUrl(path) {
-  return `${SUPABASE_URL}/storage/v1/object/public/${STORAGE_BUCKET}/${path}`;
+  return `${SUPABASE_URL}/storage/v1/object/public/${storageObjectPath(path)}`;
+}
+
+async function cleanUploadedFiles(entries) {
+  await Promise.allSettled(entries.filter(f => f.key).map(f => sbStorageDelete(f.key)));
+}
+
+async function uploadAttachments(selectedFiles, onProgress) {
+  const entries = [];
+  try {
+    onProgress(0, selectedFiles.length);
+    for (const file of selectedFiles) {
+      const path = newStoragePath(file);
+      try { await sbStorageUpload(file, path); }
+      catch (error) { throw new Error(`${file.name}: ${error.message}`); }
+      entries.push({ name: file.name, size: file.size, type: file.type, key: path, url: sbStoragePublicUrl(path) });
+      onProgress(entries.length, selectedFiles.length);
+    }
+    return entries;
+  } catch (error) {
+    await cleanUploadedFiles(entries);
+    throw error;
+  }
+}
+
+function myLinksUrl(ns = namespace) {
+  return `?user=${encodeURIComponent(ns)}`;
+}
+
+function setEditorBusy(editor, busy) {
+  editor.inert = busy;
+  editor.setAttribute('aria-busy', String(busy));
+  editor.querySelectorAll('input, textarea, button').forEach(control => { control.disabled = busy; });
+}
+
+function openImageViewer(images, startIndex) {
+  const dialog = document.createElement('dialog');
+  dialog.className = 'image-viewer';
+  dialog.setAttribute('aria-label', '图片预览');
+  dialog.innerHTML = `
+    <div class="image-viewer-toolbar">
+      <span class="image-viewer-counter" aria-live="polite"></span>
+      <button type="button" class="btn-sm" data-prev title="上一张" aria-label="上一张">${Icons.arrowLeft}</button>
+      <button type="button" class="btn-sm image-next" data-next title="下一张" aria-label="下一张">${Icons.arrowLeft}</button>
+      <a class="btn-sm" data-download download title="下载图片" aria-label="下载图片">${Icons.download}</a>
+      <button type="button" class="btn-sm" data-close title="关闭" aria-label="关闭图片预览">${Icons.close}</button>
+    </div>
+    <img class="image-viewer-full" alt="">
+  `;
+  let index = startIndex;
+  const update = () => {
+    const image = dialog.querySelector('img');
+    image.src = images[index];
+    image.alt = `图片 ${index + 1}`;
+    dialog.querySelector('.image-viewer-counter').textContent = `${index + 1} / ${images.length}`;
+    dialog.querySelector('[data-download]').href = images[index];
+    dialog.querySelector('[data-download]').download = `image-${index + 1}`;
+    dialog.querySelector('[data-prev]').disabled = index === 0;
+    dialog.querySelector('[data-next]').disabled = index === images.length - 1;
+  };
+  const move = delta => { index = Math.max(0, Math.min(images.length - 1, index + delta)); update(); };
+  dialog.querySelector('[data-prev]').onclick = () => move(-1);
+  dialog.querySelector('[data-next]').onclick = () => move(1);
+  dialog.querySelector('[data-close]').onclick = () => dialog.close();
+  dialog.onclick = event => { if (event.target === dialog) dialog.close(); };
+  dialog.addEventListener('keydown', event => {
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+      event.preventDefault();
+      move(event.key === 'ArrowLeft' ? -1 : 1);
+    }
+    if (event.key === 'Escape') event.stopPropagation();
+  });
+  dialog.addEventListener('close', () => dialog.remove(), { once: true });
+  document.body.appendChild(dialog);
+  update();
+  dialog.showModal();
 }
 
 function toast(msg, icon) {
@@ -201,23 +292,27 @@ function toast(msg, icon) {
 
 // --- image compression ---
 function compressImage(file) {
-  return new Promise(resolve => {
+  return new Promise((resolve, reject) => {
     const reader = new FileReader();
+    reader.onerror = () => reject(new Error(`${file.name}: 图片读取失败`));
     reader.onload = e => {
       const img = new Image();
+      img.onerror = () => reject(new Error(`${file.name}: 图片格式有误或暂不支持`));
       img.onload = () => {
-        const MAX = 1600;
-        let { width, height } = img;
-        if (width > MAX || height > MAX) {
-          const ratio = Math.min(MAX / width, MAX / height);
-          width = Math.round(width * ratio);
-          height = Math.round(height * ratio);
-        }
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-        canvas.getContext('2d').drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL('image/jpeg', 0.8));
+        try {
+          const MAX = 1600;
+          let { width, height } = img;
+          if (width > MAX || height > MAX) {
+            const ratio = Math.min(MAX / width, MAX / height);
+            width = Math.round(width * ratio);
+            height = Math.round(height * ratio);
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+          resolve(canvas.toDataURL('image/jpeg', 0.8));
+        } catch (error) { reject(error); }
       };
       img.src = e.target.result;
     };
@@ -258,22 +353,7 @@ function renderSetup() {
       </button>
     </div>
   `;
-  $('#save-config').onclick = () => {
-    const url = $('#sb-url-input').value.trim();
-    const key = $('#sb-key-input').value.trim();
-    const ns = $('#sb-ns-input').value.trim();
-    if (!url || !key) {
-      return toast('Project URL 和 Anon Key 不能为空', Icons.alert);
-    }
-    if (!ns) {
-      return toast('Namespace 不能为空', Icons.alert);
-    }
-    localStorage.setItem('sb_url', url);
-    localStorage.setItem('sb_anon_key', key);
-    localStorage.setItem('sb_namespace', ns);
-    toast('保存成功，重新加载中...', Icons.check);
-    setTimeout(() => location.reload(), 500);
-  };
+  $('#save-config').onclick = saveConnection;
 }
 
 // -- home page --
@@ -423,44 +503,25 @@ function renderPreviews() {
 
 async function createShortlink() {
   const btn = $('#create-btn');
+  const editor = btn.closest('.card');
   const origHTML = btn.innerHTML;
-  btn.disabled = true;
+  let uploadedEntries = [];
+  setEditorBusy(editor, true);
   btn.innerHTML = `<span class="spinner"></span> 创建中...`;
   $('#result').style.display = 'none';
 
   try {
     const text = $('#text-input').value.trim();
     if (!text && !files.length && !uploadFiles.length) {
-      btn.disabled = false;
-      btn.innerHTML = origHTML;
-      return toast('至少写点文字、传张图片或上传文件', Icons.alert);
+      throw new Error('至少写点文字、传张图片或上传文件');
     }
     const images = await Promise.all(files.map(compressImage));
 
     // Upload files to Supabase Storage
-    const fileEntries = [];
-    if (uploadFiles.length) {
-      btn.innerHTML = `<span class="spinner"></span> 上传文件中 (${0}/${uploadFiles.length})...`;
-      for (let i = 0; i < uploadFiles.length; i++) {
-        const f = uploadFiles[i];
-        const timeStr = Date.now().toString(36);
-        const safeName = `${timeStr}_${f.name.replace(/[^\w.\-]/g, '_')}`;
-        const storagePath = `${namespace}/${safeName}`;
-        try {
-          await sbStorageUpload(f, storagePath);
-          fileEntries.push({
-            name: f.name,
-            size: f.size,
-            type: f.type,
-            key: storagePath,
-            url: sbStoragePublicUrl(storagePath),
-          });
-        } catch (upErr) {
-          toast(`上传 ${f.name} 失败: ${upErr.message}`, Icons.alert);
-        }
-        btn.innerHTML = `<span class="spinner"></span> 上传文件中 (${i + 1}/${uploadFiles.length})...`;
-      }
-    }
+    const fileEntries = await uploadAttachments([...uploadFiles], (done, total) => {
+      if (total) btn.innerHTML = `<span class="spinner"></span> 上传文件中 (${done}/${total})...`;
+    });
+    uploadedEntries = fileEntries;
 
     const preview = text ? text.slice(0, 60).replace(/\n/g, ' ') :
       (images.length ? `[${images.length} images]` :
@@ -477,7 +538,8 @@ async function createShortlink() {
       created_at: created
     });
 
-    if (!rows) throw new Error('创建失败');
+    if (!rows?.[0]?.id) throw new Error('创建失败');
+    uploadedEntries = [];
 
     addOptiCreate(rows[0].id, preview, created);
 
@@ -494,10 +556,11 @@ async function createShortlink() {
     $('#copy-btn').onclick = () => { navigator.clipboard.writeText(url); toast('已复制', Icons.check); };
     $('#new-btn').onclick = () => { $('#result').style.display = 'none'; };
   } catch (err) {
+    await cleanUploadedFiles(uploadedEntries);
     toast(err.message, Icons.alert);
     console.error(err);
   }
-  btn.disabled = false;
+  setEditorBusy(editor, false);
   btn.innerHTML = origHTML;
 }
 
@@ -514,6 +577,7 @@ function skeletonView() {
 
 async function renderView(linkId) {
   app.innerHTML = skeletonView();
+  const returnUrl = myLinksUrl(new URLSearchParams(location.search).get('user') || namespace);
 
   try {
     const rows = await sb(`shortlinks?id=eq.${encodeURIComponent(linkId)}&limit=1`, 'GET');
@@ -525,7 +589,7 @@ async function renderView(linkId) {
           <div class="empty-state">
             ${Icons.file}
             <p>内容不存在</p>
-            <a class="btn btn-secondary" href=".">${Icons.arrowLeft} 返回</a>
+            <a class="btn btn-secondary" href="${esc(returnUrl)}">${Icons.arrowLeft} 返回我的短链接</a>
           </div>
         </div>`);
     }
@@ -533,6 +597,7 @@ async function renderView(linkId) {
     incrementView(linkId);
     const date = data.created ? data.created.slice(0, 16).replace('T', ' ') : '';
     let editFiles = [];
+    let editImages = [];
     let editUploadFiles = [];
     let newEditUploadFiles = [];
     let removedExistingKeys;
@@ -552,7 +617,7 @@ async function renderView(linkId) {
       if (data.images?.length) {
         html += `<div class="view-images">`;
         data.images.forEach((img, i) => {
-          html += `<a href="${img}" target="_blank" rel="noopener" aria-label="查看原图 ${i + 1}"><img src="${img}" alt="图片 ${i + 1}" loading="lazy"></a>`;
+          html += `<button type="button" class="view-image" data-image-index="${i}" aria-label="查看原图 ${i + 1}"><img src="${esc(img)}" alt="图片 ${i + 1}" loading="lazy"></button>`;
         });
         html += `</div>`;
       }
@@ -578,7 +643,7 @@ async function renderView(linkId) {
       }
 
       html += `<div class="spacer view-actions">`;
-      html += `<a class="btn btn-secondary btn-sm" href=".">${Icons.arrowLeft} 创建新的</a>`;
+      html += `<a class="btn btn-secondary btn-sm" href="${esc(returnUrl)}">${Icons.arrowLeft} 返回我的短链接</a>`;
       html += `<button class="btn btn-ghost btn-sm" id="edit-btn">${Icons.settings} 编辑</button>`;
       html += `<button class="btn btn-danger btn-sm" id="delete-link" aria-label="删除此短链接">${Icons.trash} 删除</button>`;
       html += `</div></div>`;
@@ -636,6 +701,7 @@ async function renderView(linkId) {
 
     function renderEditMode() {
       editFiles = [];
+      editImages = [...(data.images || [])];
       editUploadFiles = data.files ? [...data.files] : [];
       newEditUploadFiles = [];
       removedExistingKeys = new Set();
@@ -748,61 +814,38 @@ async function renderView(linkId) {
       $$('#existing-previews .edit-wrap').forEach(wrap => {
         wrap.onclick = () => {
           const idx = parseInt(wrap.dataset.idx);
-          data.images.splice(idx, 1);
-          renderEditMode();
+          editImages.splice(idx, 1);
+          wrap.remove();
+          $$('#existing-previews .edit-wrap').forEach((item, index) => { item.dataset.idx = index; });
         };
       });
 
       $('#save-edit-btn').onclick = async () => {
         const btn = $('#save-edit-btn');
-        btn.disabled = true;
+        const editor = btn.closest('.card');
+        let uploadedEntries = [];
+        setEditorBusy(editor, true);
         btn.innerHTML = `<span class="spinner"></span> 保存中...`;
 
         try {
           const textVal = $('#edit-text').value.trim();
-          if (!textVal && !data.images?.length && !editFiles.length && !newEditUploadFiles.length && editUploadFiles.filter(f => !removedExistingKeys.has(f.key)).length === 0) {
-            btn.disabled = false;
-            btn.innerHTML = `${Icons.check} 保存修改`;
-            return toast('至少需要文字、图片或文件', Icons.alert);
+          if (!textVal && !editImages.length && !editFiles.length && !newEditUploadFiles.length && editUploadFiles.filter(f => !removedExistingKeys.has(f.key)).length === 0) {
+            throw new Error('至少需要文字、图片或文件');
           }
 
           const newImages = editFiles.length ? await Promise.all(editFiles.map(compressImage)) : [];
           const newText = textVal;
-          const newImagesArr = newImages.length ? [...(data.images || []), ...newImages] : (data.images || []);
+          const newImagesArr = [...editImages, ...newImages];
 
           // Upload new files
-          const newFileEntries = [];
-          if (newEditUploadFiles.length) {
-            btn.innerHTML = `<span class="spinner"></span> 上传文件 (${0}/${newEditUploadFiles.length})...`;
-            for (let i = 0; i < newEditUploadFiles.length; i++) {
-              const f = newEditUploadFiles[i];
-              const timeStr = Date.now().toString(36);
-              const safeName = `${timeStr}_${f.name.replace(/[^\w.\-]/g, '_')}`;
-              const storagePath = `${namespace}/${safeName}`;
-              try {
-                await sbStorageUpload(f, storagePath);
-                newFileEntries.push({
-                  name: f.name,
-                  size: f.size,
-                  type: f.type,
-                  key: storagePath,
-                  url: sbStoragePublicUrl(storagePath),
-                });
-              } catch (upErr) {
-                toast(`上传 ${f.name} 失败: ${upErr.message}`, Icons.alert);
-              }
-              btn.innerHTML = `<span class="spinner"></span> 上传文件 (${i + 1}/${newEditUploadFiles.length})...`;
-            }
-          }
+          const newFileEntries = await uploadAttachments([...newEditUploadFiles], (done, total) => {
+            if (total) btn.innerHTML = `<span class="spinner"></span> 上传文件 (${done}/${total})...`;
+          });
+          uploadedEntries = newFileEntries;
 
           // Build final files array: keep existing not removed + new uploads
           const keptFiles = editUploadFiles.filter(f => !removedExistingKeys.has(f.key));
           const finalFiles = [...keptFiles, ...newFileEntries];
-
-          // Delete removed files from storage
-          for (const key of removedExistingKeys) {
-            sbStorageDelete(key).catch(() => {});
-          }
 
           const desc = newText ? newText.slice(0, 60).replace(/\n/g, ' ') :
             (newImagesArr.length ? `[${newImagesArr.length} images]` :
@@ -814,15 +857,19 @@ async function renderView(linkId) {
             files: finalFiles,
             description: desc
           });
+          uploadedEntries = [];
+          cleanUploadedFiles(editUploadFiles.filter(f => removedExistingKeys.has(f.key)));
 
           toast('已保存', Icons.check);
-          // Update data.files for next edit
+          data.text = newText;
+          data.images = newImagesArr;
           data.files = finalFiles;
           renderViewMode();
         } catch (err) {
+          await cleanUploadedFiles(uploadedEntries);
           toast(err.message, Icons.alert);
         }
-        btn.disabled = false;
+        setEditorBusy(editor, false);
         btn.innerHTML = `${Icons.check} 保存修改`;
       };
 
@@ -830,6 +877,9 @@ async function renderView(linkId) {
     }
 
     function bindViewActions() {
+      $$('.view-image').forEach(button => {
+        button.onclick = () => openImageViewer(data.images, Number(button.dataset.imageIndex));
+      });
       $('#edit-btn').onclick = () => renderEditMode();
       const del = $('#delete-link');
       if (del) {
@@ -856,13 +906,8 @@ async function renderView(linkId) {
             return;
           }
           try {
-            // Clean up uploaded files from storage
-            if (data.files?.length) {
-              for (const f of data.files) {
-                if (f.key) sbStorageDelete(f.key).catch(() => {});
-              }
-            }
             await sb(`shortlinks?id=eq.${encodeURIComponent(linkId)}`, 'DELETE');
+            cleanUploadedFiles(data.files || []);
 
             addOptiDelete(linkId);
             app.innerHTML = `
@@ -872,15 +917,11 @@ async function renderView(linkId) {
                   <p style="font-weight:600;color:var(--color-text)">已删除</p>
                   <p class="muted">s/${esc(linkId).slice(0, 12)} 已被永久删除</p>
                   <div class="flex" style="justify-content:center;flex-wrap:wrap">
-                    <a class="btn btn-secondary btn-sm" href=".">${Icons.arrowLeft} 创建新的</a>
-                    <button class="btn btn-ghost btn-sm" id="goto-list-btn">${Icons.list} 我的短链接</button>
+                    <a class="btn btn-secondary btn-sm" href="${esc(returnUrl)}">${Icons.arrowLeft} 返回我的短链接</a>
                   </div>
                 </div>
               </div>
             `;
-            $('#goto-list-btn').onclick = () => {
-              location.search = '?user=' + encodeURIComponent(namespace);
-            };
           } catch (err) { toast(err.message, Icons.alert); }
         };
       }
@@ -893,7 +934,7 @@ async function renderView(linkId) {
         <div class="empty-state">
           ${Icons.alert}
           <p>${esc(err.message)}</p>
-          <a class="btn btn-secondary" href=".">${Icons.arrowLeft} 返回</a>
+          <a class="btn btn-secondary" href="${esc(returnUrl)}">${Icons.arrowLeft} 返回我的短链接</a>
         </div>
       </div>`;
   }
@@ -963,7 +1004,7 @@ async function renderList(ns) {
               <span class="preview-text">${esc(preview)}</span>
               <span class="date">${vBadge}${esc(g.date)}</span>
             </div>
-            <a class="btn-sm" href="?s=${esc(g.id)}" style="text-decoration:none;flex-shrink:0">查看 ${Icons.externalLink}</a>
+            <a class="btn-sm" href="?s=${esc(g.id)}&amp;user=${encodeURIComponent(ns)}" style="text-decoration:none;flex-shrink:0">查看 ${Icons.externalLink}</a>
           </li>`;
       });
       h += `</ul>`;
@@ -1111,13 +1152,39 @@ async function renderList(ns) {
 }
 
 // -- settings page --
+function connectionValues() {
+  const rawUrl = $('#sb-url-input').value.trim();
+  const key = $('#sb-key-input').value.trim();
+  const ns = $('#sb-ns-input').value.trim();
+  if (!rawUrl || !key || !ns) throw new Error('请填写 Project URL、公开 API Key 和 Namespace');
+  let url;
+  try { url = new URL(rawUrl); } catch { throw new Error('请输入完整的 Supabase Project URL'); }
+  if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) {
+    throw new Error('Project URL 应为 http 或 https 项目地址');
+  }
+  let role;
+  try { role = JSON.parse(atob(key.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))).role; } catch {}
+  if (key.startsWith('sb_secret_') || role === 'service_role') throw new Error('请使用 anon 或 publishable 公开 Key');
+  return { url: url.href.replace(/\/+$/, ''), key, ns };
+}
+
+function saveConnection() {
+  try {
+    const config = connectionValues();
+    localStorage.setItem('sb_url', config.url);
+    localStorage.setItem('sb_anon_key', config.key);
+    localStorage.setItem('sb_namespace', config.ns);
+    location.reload();
+  } catch (error) { toast(error.message, Icons.alert); }
+}
+
 const THEME_PREVIEWS = {
-  auto:     { dots: ['#0F172A','#F8FAFC','#22C55E'], label: '自动' },
-  midnight: { dots: ['#0F172A','#1E293B','#22C55E'], label: '暗夜' },
-  daylight: { dots: ['#F8FAFC','#E2E8F0','#16A34A'], label: '日光' },
-  sepia:    { dots: ['#FDF6E3','#E6D5B8','#2E7D32'], label: '暖纸' },
-  ocean:    { dots: ['#0B192C','#1E3A5F','#06B6D4'], label: '海洋' },
-  cherry:   { dots: ['#1A0F14','#452632','#F472B6'], label: '樱桃' },
+  auto:     { label: '自动' },
+  daylight: { label: '日白' },
+  midnight: { label: '墨夜' },
+  sepia:    { label: '苔青' },
+  ocean:    { label: '雾蓝' },
+  cherry:   { label: '胭脂' },
 };
 
 function renderSettings() {
@@ -1131,14 +1198,41 @@ function renderSettings() {
         <h3>主题</h3>
         <div class="theme-grid" id="theme-grid">
           ${THEMES.map(t => `
-            <button class="theme-card ${t === current ? 'active' : ''}" data-theme="${t}" aria-label="${THEME_PREVIEWS[t].label} 主题" aria-pressed="${t === current}">
-              <div class="dot-group">
-                ${THEME_PREVIEWS[t].dots.map(c => `<span class="dot" style="background:${c}"></span>`).join('')}
-              </div>
-              <span class="swatch-name">${THEME_PREVIEWS[t].label}</span>
+            <button type="button" class="theme-card ${t === current ? 'active' : ''}" data-theme="${t}" aria-label="${THEME_PREVIEWS[t].label} 主题" aria-pressed="${t === current}">
+              <span class="theme-preview" data-preview-theme="${t === 'auto' ? 'daylight' : t}" aria-hidden="true">
+                <span class="theme-preview-sheet">
+                  <span class="theme-preview-type">Aa</span>
+                  <span class="theme-preview-lines"><i></i><i></i><i></i></span>
+                </span>
+              </span>
+              <span class="swatch-label"><span class="swatch-name">${THEME_PREVIEWS[t].label}</span><span class="theme-selected" aria-hidden="true">${Icons.check}</span></span>
             </button>
           `).join('')}
         </div>
+      </div>
+
+      <hr class="divider">
+
+      <div class="settings-section">
+        <h3>Supabase 连接</h3>
+        <form id="connection-form">
+          <label class="input-label" for="sb-url-input">Project URL</label>
+          <input id="sb-url-input" type="url" required value="${esc(SUPABASE_URL)}" placeholder="https://your-project.supabase.co" autocomplete="off">
+          <label class="input-label spacer-sm" for="sb-key-input">公开 API Key（anon / publishable）</label>
+          <div class="key-input-field">
+            <input id="sb-key-input" type="password" required value="${esc(SUPABASE_ANON_KEY)}" autocomplete="off" spellcheck="false">
+            <button type="button" class="key-visibility-toggle" id="toggle-api-key" aria-controls="sb-key-input" aria-label="显示 API Key" aria-pressed="false" title="显示 API Key">${Icons.eye}</button>
+          </div>
+          <label class="input-label spacer-sm" for="sb-ns-input">Namespace</label>
+          <input id="sb-ns-input" type="text" required value="${esc(namespace)}" autocomplete="off">
+          <div class="flex spacer-sm connection-actions">
+            <button type="button" class="btn btn-secondary btn-sm" id="test-connection">${Icons.database} 测试连接</button>
+            <button type="submit" class="btn btn-primary btn-sm">${Icons.check} 保存连接</button>
+          </div>
+          <p id="connection-status" class="muted spacer-sm" role="status"></p>
+          <p class="dim spacer-sm">配置保存在当前浏览器。切换项目后，原有短链接内容需要单独迁移。</p>
+          <a class="link spacer-sm migration-download" href="migration.sql" download>${Icons.download} 下载初始化 SQL</a>
+        </form>
       </div>
 
       <hr class="divider">
@@ -1154,7 +1248,7 @@ function renderSettings() {
 
       <div class="settings-section">
         <h3>关于</h3>
-        <p class="muted">shortlink — 轻量短链接工具</p>
+        <p class="muted">shortlink v${APP_VERSION} · 轻量短链接工具</p>
       </div>
 
     </div>
@@ -1164,12 +1258,60 @@ function renderSettings() {
     </div>
   `;
 
+  $('#connection-form').onsubmit = event => { event.preventDefault(); saveConnection(); };
+  $('#toggle-api-key').onclick = () => {
+    const input = $('#sb-key-input');
+    const button = $('#toggle-api-key');
+    const visible = input.type === 'password';
+    input.type = visible ? 'text' : 'password';
+    button.innerHTML = visible ? Icons.eyeOff : Icons.eye;
+    button.setAttribute('aria-pressed', String(visible));
+    button.setAttribute('aria-label', visible ? '隐藏 API Key' : '显示 API Key');
+    button.title = visible ? '隐藏 API Key' : '显示 API Key';
+  };
+  $('#test-connection').onclick = async () => {
+    const button = $('#test-connection');
+    const status = $('#connection-status');
+    try {
+      const config = connectionValues();
+      button.disabled = true;
+      status.textContent = '正在测试...';
+      const response = await fetch(`${config.url}/rest/v1/shortlinks?select=id,files,created,created_at&limit=0`, {
+        headers: supabaseHeaders(config.key), signal: AbortSignal.timeout(10000)
+      });
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        const message = error.message || `连接失败 (${response.status})`;
+        if (/column.*does not exist|could not find.*column|could not find.*table|relation.*does not exist/i.test(message)) {
+          throw new Error('数据表尚未初始化，请在 Supabase SQL Editor 运行 migration.sql');
+        }
+        throw new Error(message);
+      }
+      const storage = await fetch(`${config.url}/storage/v1/object/public/${STORAGE_BUCKET}/__shortlink_readonly_probe__`, {
+        headers: supabaseHeaders(config.key), signal: AbortSignal.timeout(10000)
+      });
+      if (!storage.ok) {
+        const error = await storage.json().catch(() => ({}));
+        const message = error.message || error.error || '';
+        if (/bucket.*not found/i.test(message)) throw new Error('缺少公开 files 存储桶，请在 Supabase SQL Editor 运行 migration.sql');
+        if (!/object not found|not_found/i.test(message)) throw new Error(message || `存储检查失败 (${storage.status})`);
+      }
+      status.textContent = '连接正常，数据表和公开 files 存储桶可访问';
+    } catch (error) {
+      status.textContent = error.name === 'TimeoutError' ? '连接超时，请检查项目地址' : `连接失败：${error.message}`;
+    } finally { button.disabled = false; }
+  };
+
   // theme switch
   $$('.theme-card').forEach(card => {
     card.onclick = () => {
       const t = card.dataset.theme;
       setTheme(t);
-      renderSettings();
+      $$('.theme-card').forEach(option => {
+        const active = option.dataset.theme === t;
+        option.classList.toggle('active', active);
+        option.setAttribute('aria-pressed', String(active));
+      });
     };
   });
 
