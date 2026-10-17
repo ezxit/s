@@ -489,6 +489,27 @@ code {
 .file-label:focus-visible { box-shadow: var(--focus-ring); }
 .file-label:active { transform: scale(0.97); }
 
+.attachment-drop-zone {
+  position: relative;
+  flex-wrap: wrap;
+  padding: var(--space-2);
+  margin: calc(var(--space-2) * -1);
+  border: 1px dashed transparent;
+  border-radius: var(--radius-sm);
+  transition: border-color var(--duration-fast) var(--ease-out),
+              background var(--duration-fast) var(--ease-out);
+}
+
+.attachment-drop-zone.drag-over {
+  border-color: var(--color-accent);
+  background: var(--color-accent-subtle);
+}
+
+.drop-hint {
+  color: var(--color-text-dim);
+  font-size: 0.8rem;
+}
+
 /* ---- image previews ---- */
 .previews {
   display: flex;

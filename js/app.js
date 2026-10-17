@@ -1,5 +1,5 @@
 // --- config ---
-const APP_VERSION = '1.4.2';
+const APP_VERSION = '1.4.3';
 const SUPABASE_URL = (localStorage.getItem('sb_url') || 'https://vhifkvzmujbhcdwjixdj.supabase.co').replace(/\/+$/, '');
 const SUPABASE_ANON_KEY = localStorage.getItem('sb_anon_key') || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZoaWZrdnptdWpiaGNkd2ppeGRqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE0ODgzOTYsImV4cCI6MjA5NzA2NDM5Nn0.nZ7zBk3p_Fh5Q88makO5OmHJFCJ2uG_0inIZ8kmq-zc';
 const configured = !!(SUPABASE_URL && SUPABASE_ANON_KEY);
@@ -145,6 +145,57 @@ function formatSize(bytes) {
 const STORAGE_BUCKET = 'files';
 const MAX_ATTACHMENT_SIZE = 200 * 1024 * 1024;
 const MAX_ATTACHMENT_SIZE_LABEL = '200 MB';
+
+function addAttachmentFiles(selectedFiles, target, render, input) {
+  const oversized = [];
+  for (const file of selectedFiles) {
+    if (file.size > MAX_ATTACHMENT_SIZE) oversized.push(file.name);
+    else target.push(file);
+  }
+  if (input) input.value = '';
+  if (oversized.length) {
+    toast(`${oversized.join(', ')} 超过 ${MAX_ATTACHMENT_SIZE_LABEL} 限制，已跳过`, Icons.alert);
+  }
+  render();
+}
+
+function bindAttachmentDropZone(zone, input, target, render) {
+  if (!zone) return;
+  let dragDepth = 0;
+  const setActive = active => zone.classList.toggle('drag-over', active);
+  zone.addEventListener('dragenter', event => {
+    event.preventDefault();
+    dragDepth += 1;
+    setActive(true);
+  });
+  zone.addEventListener('dragover', event => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+    setActive(true);
+  });
+  zone.addEventListener('dragleave', event => {
+    event.preventDefault();
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (!dragDepth) setActive(false);
+  });
+  zone.addEventListener('drop', event => {
+    event.preventDefault();
+    dragDepth = 0;
+    setActive(false);
+    addAttachmentFiles(event.dataTransfer.files, target, render, input);
+  });
+}
+
+function preventWindowFileDrop(event) {
+  if (event.dataTransfer?.types?.includes('Files')) event.preventDefault();
+}
+
+function enableWindowFileDropGuard() {
+  if (window.__shortlinkDropGuard) return;
+  window.addEventListener('dragover', preventWindowFileDrop);
+  window.addEventListener('drop', preventWindowFileDrop);
+  window.__shortlinkDropGuard = true;
+}
 
 function supabaseHeaders(key = SUPABASE_ANON_KEY) {
   const headers = { apikey: key };
@@ -382,12 +433,13 @@ function renderHome() {
 
       <hr class="divider">
       <label class="input-label">文件附件（单个最大 200 MB）</label>
-      <div class="flex">
+      <div class="flex attachment-drop-zone" id="upload-drop-zone">
         <label class="file-label" for="upload-file-input" tabindex="0" aria-label="上传文件">
           ${Icons.upload} 选择文件
         </label>
         <input type="file" id="upload-file-input" multiple hidden>
         <span class="muted" id="upload-file-count"></span>
+        <span class="drop-hint">或将文件拖到这里</span>
       </div>
       <div class="upload-previews" id="upload-previews"></div>
 
@@ -455,20 +507,10 @@ function bindHomeEvents() {
 
   const ufi = $('#upload-file-input');
   ufi.onchange = () => {
-    const oversized = [];
-    for (const f of ufi.files) {
-      if (f.size > MAX_ATTACHMENT_SIZE) {
-        oversized.push(f.name);
-      } else {
-        uploadFiles.push(f);
-      }
-    }
-    ufi.value = '';
-    if (oversized.length) {
-      toast(`${oversized.join(', ')} 超过 ${MAX_ATTACHMENT_SIZE_LABEL} 限制，已跳过`, Icons.alert);
-    }
-    renderUploadPreviews();
+    addAttachmentFiles(ufi.files, uploadFiles, renderUploadPreviews, ufi);
   };
+  bindAttachmentDropZone($('#upload-drop-zone'), ufi, uploadFiles, renderUploadPreviews);
+  enableWindowFileDropGuard();
 
   $('#create-btn').onclick = createShortlink;
   $('#list-btn').onclick = () => {
@@ -732,12 +774,13 @@ async function renderView(linkId) {
 
         <hr class="divider">
         <label class="input-label">文件附件（单个最大 200 MB）</label>
-        <div class="flex">
+        <div class="flex attachment-drop-zone" id="edit-upload-drop-zone">
           <label class="file-label" for="edit-upload-file-input" tabindex="0" aria-label="上传新文件">
             ${Icons.upload} 添加文件
           </label>
           <input type="file" id="edit-upload-file-input" multiple hidden>
           <span class="muted" id="edit-upload-count"></span>
+          <span class="drop-hint">或将文件拖到这里</span>
         </div>
         <div class="upload-previews" id="edit-upload-previews"></div>
       `;
@@ -799,20 +842,10 @@ async function renderView(linkId) {
       const eufi = $('#edit-upload-file-input');
       if (eufi) {
         eufi.onchange = () => {
-          const oversized = [];
-          for (const f of eufi.files) {
-            if (f.size > MAX_ATTACHMENT_SIZE) {
-              oversized.push(f.name);
-            } else {
-              newEditUploadFiles.push(f);
-            }
-          }
-          eufi.value = '';
-          if (oversized.length) {
-            toast(`${oversized.join(', ')} 超过 ${MAX_ATTACHMENT_SIZE_LABEL} 限制，已跳过`, Icons.alert);
-          }
-          renderEditUploadPreviews();
+          addAttachmentFiles(eufi.files, newEditUploadFiles, renderEditUploadPreviews, eufi);
         };
+        bindAttachmentDropZone($('#edit-upload-drop-zone'), eufi, newEditUploadFiles, renderEditUploadPreviews);
+        enableWindowFileDropGuard();
       }
 
       $$('#existing-previews .edit-wrap').forEach(wrap => {
