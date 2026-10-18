@@ -1,0 +1,162 @@
+/* Additional palettes share the same tokens as the original five themes.
+   Preview cards receive their own complete palette through data-preview-theme. */
+
+/* Linen / 燕麦 — warm paper, toasted brown. */
+:root[data-theme="linen"], [data-preview-theme="linen"] {
+  color-scheme: light;
+  --color-bg:            #F1EBDD;
+  --color-surface:       #FFFDF6;
+  --color-border:        #D9CBB5;
+  --color-muted-bg:      #F7F1E5;
+  --color-text:          #332B22;
+  --color-text-muted:    #655642;
+  --color-text-dim:      #75624E;
+  --color-accent:        #795337;
+  --color-accent-hover:  #5D3F2A;
+  --color-accent-subtle: #EEE1CC;
+  --color-accent-soft:   rgba(121,83,55,0.07);
+  --color-danger:        #A33838;
+  --color-danger-hover:  #862B2D;
+  --btn-danger-text:     #FFFFFF;
+  --color-white:         #332B22;
+  --focus-ring:          0 0 0 3px rgba(121,83,55,0.20);
+  --btn-primary-text:    #FFFFFF;
+  --result-bg:           #F5EAD7;
+  --result-border:       #C3AB88;
+  --btn-secondary-hover: #EDE1CD;
+  --btn-ghost-hover:     #F1E7D7;
+  --toast-shadow:        0 8px 30px rgba(73,51,25,0.10);
+  --del-bg:              rgba(51,35,20,0.75);
+  --skeleton-from:       #EEE4D2;
+  --skeleton-via:        #E2D4BB;
+  --card-shadow:         0 16px 50px rgba(73,51,25,0.045);
+  --hero-wash:           #E4D1AD;
+}
+
+/* Lavender / 紫藤 — pale lilac with a restrained plum ink. */
+:root[data-theme="lavender"], [data-preview-theme="lavender"] {
+  color-scheme: light;
+  --color-bg:            #EDEAF5;
+  --color-surface:       #FCFAFF;
+  --color-border:        #D5CBE4;
+  --color-muted-bg:      #F2EEF8;
+  --color-text:          #332D44;
+  --color-text-muted:    #615672;
+  --color-text-dim:      #6D617D;
+  --color-accent:        #6C4F91;
+  --color-accent-hover:  #533A73;
+  --color-accent-subtle: #EDE4F5;
+  --color-accent-soft:   rgba(108,79,145,0.07);
+  --color-danger:        #A33352;
+  --color-danger-hover:  #842640;
+  --btn-danger-text:     #FFFFFF;
+  --color-white:         #332D44;
+  --focus-ring:          0 0 0 3px rgba(108,79,145,0.20);
+  --btn-primary-text:    #FFFFFF;
+  --result-bg:           #EFE7F8;
+  --result-border:       #BDA9D4;
+  --btn-secondary-hover: #E6DDF0;
+  --btn-ghost-hover:     #EDE5F4;
+  --toast-shadow:        0 8px 30px rgba(60,40,88,0.09);
+  --del-bg:              rgba(39,27,55,0.75);
+  --skeleton-from:       #E9E1F1;
+  --skeleton-via:        #DDD0EB;
+  --card-shadow:         0 16px 50px rgba(60,40,88,0.045);
+  --hero-wash:           #D4BCEB;
+}
+
+/* Peach / 杏橙 — porcelain, apricot and burnt orange. */
+:root[data-theme="peach"], [data-preview-theme="peach"] {
+  color-scheme: light;
+  --color-bg:            #F6E9DE;
+  --color-surface:       #FFFBF6;
+  --color-border:        #E5CBB5;
+  --color-muted-bg:      #F9EFE5;
+  --color-text:          #3D2C22;
+  --color-text-muted:    #735641;
+  --color-text-dim:      #7C604C;
+  --color-accent:        #A34C25;
+  --color-accent-hover:  #833A1A;
+  --color-accent-subtle: #F6E2D0;
+  --color-accent-soft:   rgba(163,76,37,0.07);
+  --color-danger:        #A2363D;
+  --color-danger-hover:  #84282F;
+  --btn-danger-text:     #FFFFFF;
+  --color-white:         #3D2C22;
+  --focus-ring:          0 0 0 3px rgba(163,76,37,0.20);
+  --btn-primary-text:    #FFFFFF;
+  --result-bg:           #F9E8D7;
+  --result-border:       #D7B08E;
+  --btn-secondary-hover: #F0DAC5;
+  --btn-ghost-hover:     #F5E3D2;
+  --toast-shadow:        0 8px 30px rgba(104,57,24,0.09);
+  --del-bg:              rgba(66,35,16,0.75);
+  --skeleton-from:       #F1E0CF;
+  --skeleton-via:        #E7CAB0;
+  --card-shadow:         0 16px 50px rgba(104,57,24,0.045);
+  --hero-wash:           #EDBF96;
+}
+
+/* Cobalt / 深海 — a quiet navy with clear, powder blue accents. */
+:root[data-theme="cobalt"], [data-preview-theme="cobalt"] {
+  color-scheme: dark;
+  --color-bg:            #101C2B;
+  --color-surface:       #17273B;
+  --color-border:        #3E5876;
+  --color-muted-bg:      #1E324B;
+  --color-text:          #EEF4FC;
+  --color-text-muted:    #BCCBE0;
+  --color-text-dim:      #A4B9D3;
+  --color-accent:        #96C5F4;
+  --color-accent-hover:  #B1D7FC;
+  --color-accent-subtle: #203D5B;
+  --color-accent-soft:   rgba(150,197,244,0.09);
+  --color-danger:        #FFAEA3;
+  --color-danger-hover:  #FFC7BE;
+  --btn-danger-text:     #351C1C;
+  --color-white:         #EEF4FC;
+  --focus-ring:          0 0 0 3px rgba(150,197,244,0.28);
+  --btn-primary-text:    #10243B;
+  --result-bg:           #1D3650;
+  --result-border:       #547BA4;
+  --btn-secondary-hover: #2B4564;
+  --btn-ghost-hover:     #223A55;
+  --toast-shadow:        0 8px 30px rgba(0,7,18,0.28);
+  --del-bg:              rgba(3,11,22,0.82);
+  --skeleton-from:       #203650;
+  --skeleton-via:        #314E70;
+  --card-shadow:         0 18px 60px rgba(0,7,18,0.13);
+  --hero-wash:           #284E78;
+}
+
+/* Graphite / 石墨 — charcoal and a soft, warm white. */
+:root[data-theme="graphite"], [data-preview-theme="graphite"] {
+  color-scheme: dark;
+  --color-bg:            #1D1E20;
+  --color-surface:       #26282B;
+  --color-border:        #555556;
+  --color-muted-bg:      #303337;
+  --color-text:          #F4F1EB;
+  --color-text-muted:    #C7C2BA;
+  --color-text-dim:      #B0AAA1;
+  --color-accent:        #DED2BA;
+  --color-accent-hover:  #F1E5CE;
+  --color-accent-subtle: #3E3A32;
+  --color-accent-soft:   rgba(222,210,186,0.08);
+  --color-danger:        #F0ABA4;
+  --color-danger-hover:  #F7C5BF;
+  --btn-danger-text:     #351D1C;
+  --color-white:         #F4F1EB;
+  --focus-ring:          0 0 0 3px rgba(222,210,186,0.27);
+  --btn-primary-text:    #29251F;
+  --result-bg:           #37352F;
+  --result-border:       #7C735F;
+  --btn-secondary-hover: #444440;
+  --btn-ghost-hover:     #37393B;
+  --toast-shadow:        0 8px 30px rgba(0,0,0,0.26);
+  --del-bg:              rgba(6,7,9,0.82);
+  --skeleton-from:       #343638;
+  --skeleton-via:        #494B4D;
+  --card-shadow:         0 18px 60px rgba(0,0,0,0.11);
+  --hero-wash:           #65604F;
+}

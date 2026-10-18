@@ -1,5 +1,5 @@
 // --- config ---
-const APP_VERSION = '1.4.4';
+const APP_VERSION = '1.4.5';
 const SUPABASE_URL = (localStorage.getItem('sb_url') || 'https://vhifkvzmujbhcdwjixdj.supabase.co').replace(/\/+$/, '');
 const SUPABASE_ANON_KEY = localStorage.getItem('sb_anon_key') || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZoaWZrdnptdWpiaGNkd2ppeGRqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE0ODgzOTYsImV4cCI6MjA5NzA2NDM5Nn0.nZ7zBk3p_Fh5Q88makO5OmHJFCJ2uG_0inIZ8kmq-zc';
 const configured = !!(SUPABASE_URL && SUPABASE_ANON_KEY);
@@ -80,7 +80,7 @@ function cleanOptiState(apiIds) {
   saveOptiDeletes(deletes);
 }
 
-const THEMES = ['auto', 'daylight', 'midnight', 'sepia', 'ocean', 'cherry'];
+const THEMES = ['auto', 'daylight', 'linen', 'sepia', 'ocean', 'lavender', 'peach', 'cherry', 'midnight', 'cobalt', 'graphite'];
 
 function getTheme() {
   const t = localStorage.getItem('theme') || 'auto';
@@ -99,6 +99,18 @@ function setTheme(name) {
 function applyTheme(name) {
   const effective = name === 'auto' ? resolveAuto() : name;
   document.documentElement.setAttribute('data-theme', effective);
+  document.querySelectorAll('[data-theme-choice]').forEach(button => {
+    button.setAttribute('aria-pressed', String(button.dataset.themeChoice === name));
+  });
+  document.querySelectorAll('.theme-card').forEach(button => {
+    const active = button.dataset.theme === name;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-pressed', String(active));
+  });
+  const label = document.querySelector('#active-theme-name');
+  if (label) label.textContent = THEME_PREVIEWS[name].label;
+  const description = document.querySelector('#active-theme-description');
+  if (description) description.textContent = THEME_PREVIEWS[name].description;
 }
 
 // --- helpers ---
@@ -159,17 +171,21 @@ function addAttachmentFiles(selectedFiles, target, render, input) {
   render();
 }
 
-function bindAttachmentDropZone(zone, input, target, render) {
+function bindAttachmentDropZone(zone, input, onFiles) {
   if (!zone) return;
   let dragDepth = 0;
   const setActive = active => zone.classList.toggle('drag-over', active);
   zone.addEventListener('dragenter', event => {
+    if (!event.dataTransfer?.types?.includes('Files')) return;
     event.preventDefault();
+    if (input.disabled) return;
     dragDepth += 1;
     setActive(true);
   });
   zone.addEventListener('dragover', event => {
+    if (!event.dataTransfer?.types?.includes('Files')) return;
     event.preventDefault();
+    if (input.disabled) { setActive(false); return; }
     event.dataTransfer.dropEffect = 'copy';
     setActive(true);
   });
@@ -179,10 +195,11 @@ function bindAttachmentDropZone(zone, input, target, render) {
     if (!dragDepth) setActive(false);
   });
   zone.addEventListener('drop', event => {
+    if (!event.dataTransfer?.types?.includes('Files')) return;
     event.preventDefault();
     dragDepth = 0;
     setActive(false);
-    addAttachmentFiles(event.dataTransfer.files, target, render, input);
+    if (!input.disabled) onFiles(event.dataTransfer.files);
   });
 }
 
@@ -383,6 +400,15 @@ function render() {
   const sid = params.get('s');
   const user = params.get('user');
   const page = params.get('page');
+  const activePage = page === 'settings' ? 'settings' : (sid ? 'view' : (user ? 'list' : 'home'));
+  app.dataset.page = activePage;
+  $('#site-header').innerHTML = `
+    <a class="site-brand" href="." aria-label="shortlink 首页"><span class="brand-mark" aria-hidden="true">S</span><span>shortlink<span class="brand-caption">A SMALL PLACE TO SHARE</span></span></a>
+    <nav class="site-nav" aria-label="主导航">
+      <a href="." ${activePage === 'home' ? 'aria-current="page"' : ''}>创建</a>
+      <a href="${myLinksUrl()}" ${activePage === 'list' ? 'aria-current="page"' : ''}>我的短链接</a>
+      <a href="?page=settings" aria-label="设置" ${activePage === 'settings' ? 'aria-current="page"' : ''}>${Icons.settings}<span>设置</span></a>
+    </nav>`;
 
   if (page === 'settings') return renderSettings();
   if (!configured) return renderSetup();
@@ -418,34 +444,55 @@ let uploadFiles = [];
 
 function renderHome() {
   app.innerHTML = `
-    <div class="logo">${Icons.link}<span>shortlink</span></div>
-    <div class="card fade-in">
+    <div class="home-layout">
+    <section class="home-intro fade-in" aria-labelledby="home-title">
+      <p class="eyebrow"><span></span> A LITTLE SPACE FOR EVERYTHING</p>
+      <h1 id="home-title">小小链接，<br>装下<span>此刻。</span></h1>
+      <p class="intro-copy">一段文字，几张照片，或一份文件。<br>放在一起，再用一个链接分享出去。</p>
+      <div class="intro-rule"></div>
+      <p class="intro-note">简单记录，轻轻分享。</p>
+      <div class="quick-appearance">
+        <p class="eyebrow">换一种心情</p>
+        <div class="quick-theme-list" aria-label="快速切换主题">
+          ${['daylight', 'linen', 'sepia', 'lavender', 'peach', 'cobalt', 'graphite'].map(theme => `
+            <button type="button" class="quick-theme" data-theme-choice="${theme}" data-preview-theme="${theme}" aria-label="切换到${THEME_PREVIEWS[theme].label}主题" aria-pressed="${getTheme() === theme}" title="${THEME_PREVIEWS[theme].label}"><span></span></button>
+          `).join('')}
+          <a class="all-themes" href="?page=settings" aria-label="查看全部主题">全部 ${Icons.externalLink}</a>
+        </div>
+      </div>
+    </section>
+    <div class="card composer-card fade-in">
+      <div class="composer-heading"><div><span class="eyebrow">NEW SHORTLINK</span><h2>创建一份分享</h2></div><span class="composer-index" aria-hidden="true">01 /</span></div>
+      <div class="composer-grid">
+      <section class="compose-content">
       <label class="input-label" for="text-input">内容</label>
-      <textarea id="text-input" placeholder="写点什么..."></textarea>
+      <textarea id="text-input" placeholder="从一句想分享的话开始…"></textarea>
       <div class="flex spacer-sm">
-        <label class="file-label" for="file-input" tabindex="0" aria-label="添加图片">
+        <button type="button" class="file-label" id="choose-images" aria-label="添加图片">
           ${Icons.image} 添加图片
-        </label>
+        </button>
         <input type="file" id="file-input" accept="image/*" multiple hidden>
         <span class="muted" id="img-count"></span>
       </div>
       <div class="previews" id="previews"></div>
-
-      <hr class="divider">
-      <label class="input-label">文件附件（单个最大 200 MB）</label>
-      <div class="flex attachment-drop-zone" id="upload-drop-zone">
-        <label class="file-label" for="upload-file-input" tabindex="0" aria-label="上传文件">
-          ${Icons.upload} 选择文件
-        </label>
-        <input type="file" id="upload-file-input" multiple hidden>
-        <span class="muted" id="upload-file-count"></span>
-        <span class="drop-hint">或将文件拖到这里</span>
-      </div>
-      <div class="upload-previews" id="upload-previews"></div>
-
-      <button class="btn btn-primary spacer" id="create-btn" style="width:100%">
-        ${Icons.link} 创建短链接
+      </section>
+      <section class="compose-attachments">
+      <div class="attachment-heading"><span class="input-label">文件附件</span><span class="dim">单个最大 200 MB</span></div>
+      <button type="button" class="attachment-drop-zone" id="upload-drop-zone" aria-label="选择文件或将文件拖入此处" aria-describedby="upload-drop-hint">
+        <span class="drop-symbol" aria-hidden="true">${Icons.upload}</span>
+        <span class="drop-title">把文件拖到这里</span>
+        <span class="drop-hint" id="upload-drop-hint">或点击选择文件 · 支持多个文件</span>
       </button>
+      <input type="file" id="upload-file-input" multiple hidden>
+      <span class="muted upload-count" id="upload-file-count" role="status"></span>
+      <div class="upload-previews" id="upload-previews"></div>
+      </section>
+      </div>
+      <div class="composer-bottom"><span class="compose-footnote">准备好了，就分享吧。</span>
+      <button class="btn btn-primary" id="create-btn">
+        创建短链接 <span aria-hidden="true">↗</span>
+      </button>
+      </div>
       <div class="result spacer" id="result">
         <div class="success-text">${Icons.check} 创建成功</div>
         <a class="result-url" id="result-url" href="" target="_blank" rel="noopener"></a>
@@ -455,13 +502,6 @@ function renderHome() {
         </div>
       </div>
     </div>
-    <div class="bg-actions">
-      <button class="btn btn-ghost" id="list-btn">
-        ${Icons.list} 我的短链接
-      </button>
-      <a class="btn btn-ghost" href="?page=settings" style="text-decoration:none" aria-label="设置">
-        ${Icons.settings} 设置
-      </a>
     </div>
   `;
   files = [];
@@ -499,6 +539,7 @@ function renderUploadPreviews() {
 
 function bindHomeEvents() {
   const fi = $('#file-input');
+  $('#choose-images').onclick = () => fi.click();
   fi.onchange = () => {
     files.push(...fi.files);
     fi.value = '';
@@ -506,16 +547,17 @@ function bindHomeEvents() {
   };
 
   const ufi = $('#upload-file-input');
+  $('#upload-drop-zone').onclick = () => ufi.click();
   ufi.onchange = () => {
     addAttachmentFiles(ufi.files, uploadFiles, renderUploadPreviews, ufi);
   };
-  bindAttachmentDropZone($('#upload-drop-zone'), ufi, uploadFiles, renderUploadPreviews);
+  bindAttachmentDropZone($('#upload-drop-zone'), ufi, selected => addAttachmentFiles(selected, uploadFiles, renderUploadPreviews, ufi));
   enableWindowFileDropGuard();
 
   $('#create-btn').onclick = createShortlink;
-  $('#list-btn').onclick = () => {
-    location.search = '?user=' + encodeURIComponent(namespace);
-  };
+  $$('[data-theme-choice]').forEach(button => {
+    button.onclick = () => setTheme(button.dataset.themeChoice);
+  });
 }
 
 function renderPreviews() {
@@ -764,9 +806,9 @@ async function renderView(linkId) {
         <label class="input-label" for="edit-text">文字内容</label>
         <textarea id="edit-text" placeholder="写点什么...">${esc(data.text || '')}</textarea>
         <div class="flex spacer-sm">
-          <label class="file-label" for="edit-file-input" tabindex="0" aria-label="添加新图片">
+          <button type="button" class="file-label" id="edit-choose-images" aria-label="添加新图片">
             ${Icons.image} 添加图片
-          </label>
+          </button>
           <input type="file" id="edit-file-input" accept="image/*" multiple hidden>
           <span class="muted" id="edit-img-count"></span>
         </div>
@@ -774,14 +816,13 @@ async function renderView(linkId) {
 
         <hr class="divider">
         <label class="input-label">文件附件（单个最大 200 MB）</label>
-        <div class="flex attachment-drop-zone" id="edit-upload-drop-zone">
-          <label class="file-label" for="edit-upload-file-input" tabindex="0" aria-label="上传新文件">
-            ${Icons.upload} 添加文件
-          </label>
-          <input type="file" id="edit-upload-file-input" multiple hidden>
-          <span class="muted" id="edit-upload-count"></span>
-          <span class="drop-hint">或将文件拖到这里</span>
-        </div>
+        <button type="button" class="attachment-drop-zone" id="edit-upload-drop-zone" aria-label="添加文件或将文件拖入此处" aria-describedby="edit-upload-drop-hint">
+          <span class="drop-symbol" aria-hidden="true">${Icons.upload}</span>
+          <span class="drop-title">把文件拖到这里</span>
+          <span class="drop-hint" id="edit-upload-drop-hint">或点击选择文件 · 支持多个文件</span>
+        </button>
+        <input type="file" id="edit-upload-file-input" multiple hidden>
+        <span class="muted upload-count" id="edit-upload-count" role="status"></span>
         <div class="upload-previews" id="edit-upload-previews"></div>
       `;
 
@@ -832,6 +873,7 @@ async function renderView(linkId) {
     function bindEditActions() {
       const efi = $('#edit-file-input');
       if (efi) {
+        $('#edit-choose-images').onclick = () => efi.click();
         efi.onchange = () => {
           editFiles.push(...efi.files);
           efi.value = '';
@@ -841,10 +883,11 @@ async function renderView(linkId) {
 
       const eufi = $('#edit-upload-file-input');
       if (eufi) {
+        $('#edit-upload-drop-zone').onclick = () => eufi.click();
         eufi.onchange = () => {
           addAttachmentFiles(eufi.files, newEditUploadFiles, renderEditUploadPreviews, eufi);
         };
-        bindAttachmentDropZone($('#edit-upload-drop-zone'), eufi, newEditUploadFiles, renderEditUploadPreviews);
+        bindAttachmentDropZone($('#edit-upload-drop-zone'), eufi, selected => addAttachmentFiles(selected, newEditUploadFiles, renderEditUploadPreviews, eufi));
         enableWindowFileDropGuard();
       }
 
@@ -1216,23 +1259,35 @@ function saveConnection() {
 }
 
 const THEME_PREVIEWS = {
-  auto:     { label: '自动' },
-  daylight: { label: '日白' },
-  midnight: { label: '墨夜' },
-  sepia:    { label: '苔青' },
-  ocean:    { label: '雾蓝' },
-  cherry:   { label: '胭脂' },
+  auto:     { label: '跟随系统', description: '随日夜变化，让光线决定颜色。' },
+  daylight: { label: '日白', description: '清透纸白与一抹朱红，简单、明亮。' },
+  linen:    { label: '燕麦', description: '温暖的纸张色，像午后翻开的一页书。' },
+  sepia:    { label: '苔青', description: '柔和草木绿，把片刻安静留在屏幕上。' },
+  ocean:    { label: '雾蓝', description: '浅蓝与墨色，像窗外清晨的薄雾。' },
+  lavender: { label: '紫藤', description: '轻盈淡紫，为日常添一点温柔。' },
+  peach:    { label: '杏橙', description: '杏色与焦糖橙，让每次分享多一点暖意。' },
+  cherry:   { label: '胭脂', description: '柔粉与酒红，带一点复古的浪漫。' },
+  midnight: { label: '墨夜', description: '深绿与微光，适合安静的夜晚。' },
+  cobalt:   { label: '深海', description: '深邃海蓝与清澈浅蓝，夜里也有层次。' },
+  graphite: { label: '石墨', description: '纯粹炭灰与柔白，把注意力留给内容。' },
 };
 
 function renderSettings() {
   const current = getTheme();
 
   app.innerHTML = `
-    <div class="logo">${Icons.settings}<span>设置</span></div>
-    <div class="card fade-in">
-
-      <div class="settings-section">
-        <h3>主题</h3>
+    <div class="page-heading fade-in"><div><p class="eyebrow">MAKE IT YOURS</p><h1>你的偏好，你的空间。</h1></div><p>选一个喜欢的颜色，让分享更像你。</p></div>
+    <div class="settings-layout">
+    <section class="card appearance-card fade-in" aria-labelledby="appearance-heading">
+      <div class="section-heading"><div><p class="eyebrow">01 / APPEARANCE</p><h2 id="appearance-heading">外观与主题</h2></div><span class="theme-total">10 套配色 + 自动</span></div>
+      <div class="appearance-sample">
+        <div class="sample-topline"><span>YOUR LITTLE SPACE</span><span aria-hidden="true">S.</span></div>
+        <p class="sample-title">Less, but better.</p>
+        <p class="sample-copy">给灵感留白，让分享发生。</p>
+        <div class="sample-bottom"><span id="active-theme-name">${THEME_PREVIEWS[current].label}</span><span class="sample-palette" aria-hidden="true"><i></i><i></i><i></i></span></div>
+      </div>
+      <p class="appearance-description" id="active-theme-description" role="status">${THEME_PREVIEWS[current].description}</p>
+      <div class="settings-section theme-section">
         <div class="theme-grid" id="theme-grid">
           ${THEMES.map(t => `
             <button type="button" class="theme-card ${t === current ? 'active' : ''}" data-theme="${t}" aria-label="${THEME_PREVIEWS[t].label} 主题" aria-pressed="${t === current}">
@@ -1242,16 +1297,17 @@ function renderSettings() {
                   <span class="theme-preview-lines"><i></i><i></i><i></i></span>
                 </span>
               </span>
-              <span class="swatch-label"><span class="swatch-name">${THEME_PREVIEWS[t].label}</span><span class="theme-selected" aria-hidden="true">${Icons.check}</span></span>
+              <span class="swatch-label"><span class="swatch-name">${THEME_PREVIEWS[t].label}${['linen', 'lavender', 'peach', 'cobalt', 'graphite'].includes(t) ? '<span class="new-theme-dot" aria-label="新主题"></span>' : ''}</span><span class="theme-selected" aria-hidden="true">${Icons.check}</span></span>
             </button>
           `).join('')}
         </div>
       </div>
-
-      <hr class="divider">
-
-      <div class="settings-section">
-        <h3>Supabase 连接</h3>
+      <p class="dim theme-saved-note">点击即刻切换，偏好会自动保存。</p>
+    </section>
+    <div class="settings-details">
+      <section class="card settings-section connection-card fade-in">
+        <div class="section-heading"><div><p class="eyebrow">02 / CONNECTION</p><h2>存储连接</h2></div>${Icons.database}</div>
+        <p class="section-copy">连接你的 Supabase，收好每一份分享。</p>
         <form id="connection-form">
           <label class="input-label" for="sb-url-input">Project URL</label>
           <input id="sb-url-input" type="url" required value="${esc(SUPABASE_URL)}" placeholder="https://your-project.supabase.co" autocomplete="off">
@@ -1270,28 +1326,17 @@ function renderSettings() {
           <p class="dim spacer-sm">配置保存在当前浏览器。切换项目后，原有短链接内容需要单独迁移。</p>
           <a class="link spacer-sm migration-download" href="migration.sql" download>${Icons.download} 下载初始化 SQL</a>
         </form>
-      </div>
-
-      <hr class="divider">
-
-      <div class="settings-section">
-        <h3>数据</h3>
+      </section>
+      <section class="card settings-section data-card">
+        <div><p class="eyebrow">03 / LOCAL DATA</p><h2>本地数据</h2><p class="dim">清除浏览器中保存的连接与偏好设置。</p></div>
+        <div class="data-actions">
         <button class="btn-sm" id="clear-data-btn" style="color:var(--color-danger)">
           ${Icons.alert} 清除全部本地数据
         </button>
-      </div>
-
-      <hr class="divider">
-
-      <div class="settings-section">
-        <h3>关于</h3>
-        <p class="muted">shortlink v${APP_VERSION} · 轻量短链接工具</p>
-      </div>
-
+        </div>
+      </section>
+      <p class="settings-about">shortlink v${APP_VERSION} · 少一点步骤，多一点分享。</p>
     </div>
-
-    <div class="settings-back">
-      <a class="btn btn-secondary" href=".">${Icons.arrowLeft} 返回首页</a>
     </div>
   `;
 
@@ -1342,13 +1387,7 @@ function renderSettings() {
   // theme switch
   $$('.theme-card').forEach(card => {
     card.onclick = () => {
-      const t = card.dataset.theme;
-      setTheme(t);
-      $$('.theme-card').forEach(option => {
-        const active = option.dataset.theme === t;
-        option.classList.toggle('active', active);
-        option.setAttribute('aria-pressed', String(active));
-      });
+      setTheme(card.dataset.theme);
     };
   });
 
