@@ -1,5 +1,5 @@
 // --- config ---
-const APP_VERSION = '1.4.5';
+const APP_VERSION = '1.4.6';
 const SUPABASE_URL = (localStorage.getItem('sb_url') || 'https://vhifkvzmujbhcdwjixdj.supabase.co').replace(/\/+$/, '');
 const SUPABASE_ANON_KEY = localStorage.getItem('sb_anon_key') || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZoaWZrdnptdWpiaGNkd2ppeGRqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE0ODgzOTYsImV4cCI6MjA5NzA2NDM5Nn0.nZ7zBk3p_Fh5Q88makO5OmHJFCJ2uG_0inIZ8kmq-zc';
 const configured = !!(SUPABASE_URL && SUPABASE_ANON_KEY);
@@ -141,6 +141,9 @@ const Icons = {
   upload: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>`,
   download: `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`,
   close: `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`,
+  zoomIn: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3M8 11h6M11 8v6"/></svg>`,
+  zoomOut: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3M8 11h6"/></svg>`,
+  fitImage: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3m13-5h3a2 2 0 0 1 2 2v3M3 16v3a2 2 0 0 0 2 2h3m13-5v3a2 2 0 0 1-2 2h-3"/></svg>`,
 };
 
 // --- format file size ---
@@ -301,6 +304,51 @@ async function uploadAttachments(selectedFiles, onProgress) {
   }
 }
 
+function attachmentDownloadName(file) {
+  let name = typeof file.name === 'string' ? file.name : '';
+  if (!name.trim()) {
+    try {
+      const pathname = new URL(file.url, location.href).pathname;
+      name = decodeURIComponent(pathname.slice(pathname.lastIndexOf('/') + 1));
+    } catch { name = ''; }
+  }
+  return (name || 'download').replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_');
+}
+
+async function downloadAttachment(file, control) {
+  if (control?.dataset.downloading === 'true') return;
+  if (control) {
+    control.dataset.downloading = 'true';
+    control.setAttribute('aria-busy', 'true');
+    control.setAttribute('aria-disabled', 'true');
+  }
+  let objectUrl;
+  let link;
+  try {
+    toast('正在准备下载…', Icons.download);
+    const response = await fetch(file.url, { credentials: 'omit' });
+    if (!response.ok) throw new Error(`请求失败 (${response.status})`);
+    // Cross-origin links ignore the download filename; a local Blob URL retains it.
+    objectUrl = URL.createObjectURL(await response.blob());
+    link = document.createElement('a');
+    link.href = objectUrl;
+    link.download = attachmentDownloadName(file);
+    document.body.appendChild(link);
+    link.click();
+    toast('已开始下载', Icons.check);
+  } catch (error) {
+    toast(`下载失败：${error.message || '请检查网络后重试'}`, Icons.alert);
+  } finally {
+    link?.remove();
+    if (objectUrl) setTimeout(() => URL.revokeObjectURL(objectUrl), 60000);
+    if (control) {
+      delete control.dataset.downloading;
+      control.removeAttribute('aria-busy');
+      control.removeAttribute('aria-disabled');
+    }
+  }
+}
+
 function myLinksUrl(ns = namespace) {
   return `?user=${encodeURIComponent(ns)}`;
 }
@@ -312,51 +360,185 @@ function setEditorBusy(editor, busy) {
 }
 
 function openImageViewer(images, startIndex) {
+  if (!images.length) return;
+  const previousFocus = document.activeElement;
+  const previousOverflow = document.body.style.overflow;
   const dialog = document.createElement('dialog');
   dialog.className = 'image-viewer';
   dialog.setAttribute('aria-label', '图片预览');
   dialog.innerHTML = `
     <div class="image-viewer-toolbar">
       <span class="image-viewer-counter" aria-live="polite"></span>
-      <button type="button" class="btn-sm" data-prev title="上一张" aria-label="上一张">${Icons.arrowLeft}</button>
-      <button type="button" class="btn-sm image-next" data-next title="下一张" aria-label="下一张">${Icons.arrowLeft}</button>
-      <a class="btn-sm" data-download download title="下载图片" aria-label="下载图片">${Icons.download}</a>
-      <button type="button" class="btn-sm" data-close title="关闭" aria-label="关闭图片预览">${Icons.close}</button>
+      <div class="image-viewer-navigation">
+        <button type="button" class="btn-sm" data-prev title="上一张" aria-label="上一张">${Icons.arrowLeft}</button>
+        <button type="button" class="btn-sm image-next" data-next title="下一张" aria-label="下一张">${Icons.arrowLeft}</button>
+      </div>
+      <div class="image-viewer-zoom" role="group" aria-label="图片缩放">
+        <button type="button" class="btn-sm" data-zoom-out title="缩小" aria-label="缩小">${Icons.zoomOut}</button>
+        <label class="image-viewer-scale"><input type="number" min="1" max="500" step="1" value="100" data-zoom-value aria-label="缩放比例（百分比）"><span aria-hidden="true">%</span></label>
+        <button type="button" class="btn-sm" data-zoom-in title="放大" aria-label="放大">${Icons.zoomIn}</button>
+        <button type="button" class="btn-sm" data-fit title="适应窗口" aria-label="适应窗口">${Icons.fitImage}</button>
+        <button type="button" class="btn-sm" data-actual title="原始大小" aria-label="原始大小">1:1</button>
+      </div>
+      <div class="image-viewer-actions">
+        <button type="button" class="btn-sm" data-download title="下载图片" aria-label="下载图片">${Icons.download}</button>
+        <button type="button" class="btn-sm" data-close title="关闭" aria-label="关闭图片预览">${Icons.close}</button>
+      </div>
     </div>
-    <img class="image-viewer-full" alt="">
+    <div class="image-viewer-stage" tabindex="0" aria-label="图片">
+      <div class="image-viewer-surface"><img class="image-viewer-full" alt="" draggable="false"></div>
+      <p class="image-viewer-status" role="status"></p>
+    </div>
   `;
-  let index = startIndex;
+  const image = dialog.querySelector('img');
+  const stage = dialog.querySelector('.image-viewer-stage');
+  const surface = dialog.querySelector('.image-viewer-surface');
+  const status = dialog.querySelector('.image-viewer-status');
+  const zoomInput = dialog.querySelector('[data-zoom-value]');
+  const zoomIn = dialog.querySelector('[data-zoom-in]');
+  const zoomOut = dialog.querySelector('[data-zoom-out]');
+  const fitButton = dialog.querySelector('[data-fit]');
+  const actualButton = dialog.querySelector('[data-actual]');
+  let index = Math.max(0, Math.min(images.length - 1, startIndex || 0));
+  let zoom = 1;
+  let ready = false;
+  let fitted = true;
+  let drag = null;
+  const syncControls = () => {
+    zoomInput.value = Math.round(zoom * 100);
+    zoomInput.disabled = fitButton.disabled = actualButton.disabled = !ready;
+    zoomIn.disabled = !ready || zoom >= 5;
+    zoomOut.disabled = !ready || zoom <= 0.01;
+    fitButton.setAttribute('aria-pressed', String(fitted));
+    actualButton.setAttribute('aria-pressed', String(!fitted && zoom === 1));
+  };
+  const layout = () => {
+    const width = Math.round(image.naturalWidth * zoom);
+    const height = Math.round(image.naturalHeight * zoom);
+    image.style.width = `${width}px`;
+    image.style.height = `${height}px`;
+    surface.style.width = `${Math.max(stage.clientWidth, width)}px`;
+    surface.style.height = `${Math.max(stage.clientHeight, height)}px`;
+    stage.classList.toggle('can-pan', width > stage.clientWidth || height > stage.clientHeight);
+    syncControls();
+  };
+  const setZoom = (value, anchor) => {
+    if (!ready || !Number.isFinite(value)) { syncControls(); return; }
+    const rect = stage.getBoundingClientRect();
+    const x = anchor ? anchor.clientX - rect.left : stage.clientWidth / 2;
+    const y = anchor ? anchor.clientY - rect.top : stage.clientHeight / 2;
+    // Keep the same image point beneath the cursor as the scroll surface grows.
+    const imageX = (stage.scrollLeft + x - Math.max(0, (stage.clientWidth - image.naturalWidth * zoom) / 2)) / zoom;
+    const imageY = (stage.scrollTop + y - Math.max(0, (stage.clientHeight - image.naturalHeight * zoom) / 2)) / zoom;
+    zoom = Math.max(0.01, Math.min(5, Math.round(value * 100) / 100));
+    fitted = false;
+    layout();
+    stage.scrollLeft = imageX * zoom + Math.max(0, (stage.clientWidth - image.naturalWidth * zoom) / 2) - x;
+    stage.scrollTop = imageY * zoom + Math.max(0, (stage.clientHeight - image.naturalHeight * zoom) / 2) - y;
+  };
+  const fit = () => {
+    if (!ready) return;
+    zoom = Math.max(0.01, Math.floor(Math.min(1, stage.clientWidth / image.naturalWidth, stage.clientHeight / image.naturalHeight) * 100) / 100);
+    fitted = true;
+    layout();
+    stage.scrollLeft = stage.scrollTop = 0;
+  };
+  image.onload = () => {
+    ready = true;
+    status.textContent = '';
+    image.hidden = false;
+    fit();
+  };
+  image.onerror = () => {
+    ready = false;
+    status.textContent = '图片加载失败';
+    syncControls();
+  };
   const update = () => {
-    const image = dialog.querySelector('img');
+    ready = false;
+    fitted = true;
+    image.hidden = true;
+    status.textContent = '加载中';
+    surface.style.width = surface.style.height = '100%';
+    stage.classList.remove('can-pan');
+    stage.scrollLeft = stage.scrollTop = 0;
+    syncControls();
     image.src = images[index];
     image.alt = `图片 ${index + 1}`;
     dialog.querySelector('.image-viewer-counter').textContent = `${index + 1} / ${images.length}`;
-    dialog.querySelector('[data-download]').href = images[index];
-    dialog.querySelector('[data-download]').download = `image-${index + 1}`;
     dialog.querySelector('[data-prev]').disabled = index === 0;
     dialog.querySelector('[data-next]').disabled = index === images.length - 1;
   };
-  const move = delta => { index = Math.max(0, Math.min(images.length - 1, index + delta)); update(); };
+  const move = delta => {
+    const next = Math.max(0, Math.min(images.length - 1, index + delta));
+    if (next !== index) { index = next; update(); }
+  };
   dialog.querySelector('[data-prev]').onclick = () => move(-1);
   dialog.querySelector('[data-next]').onclick = () => move(1);
+  zoomIn.onclick = () => setZoom(zoom + 0.25);
+  zoomOut.onclick = () => setZoom(zoom - 0.25);
+  zoomInput.onchange = () => setZoom(zoomInput.value === '' ? NaN : Number(zoomInput.value) / 100);
+  fitButton.onclick = fit;
+  actualButton.onclick = () => setZoom(1);
+  dialog.querySelector('[data-download]').onclick = event => {
+    downloadAttachment({ url: images[index], name: `图片-${index + 1}.jpg` }, event.currentTarget);
+  };
   dialog.querySelector('[data-close]').onclick = () => dialog.close();
   dialog.onclick = event => { if (event.target === dialog) dialog.close(); };
+  dialog.addEventListener('wheel', event => {
+    if (!event.ctrlKey || !stage.contains(event.target)) return;
+    event.preventDefault();
+    if (event.deltaY) setZoom(zoom * (event.deltaY < 0 ? 1.1 : 1 / 1.1), event);
+  }, { passive: false });
+  stage.addEventListener('pointerdown', event => {
+    if (event.pointerType !== 'mouse' || event.button !== 0 || !stage.classList.contains('can-pan')) return;
+    event.preventDefault();
+    drag = { x: event.clientX, y: event.clientY, left: stage.scrollLeft, top: stage.scrollTop };
+    stage.setPointerCapture(event.pointerId);
+    stage.classList.add('is-panning');
+    stage.focus();
+  });
+  stage.addEventListener('pointermove', event => {
+    if (!drag) return;
+    stage.scrollLeft = drag.left - (event.clientX - drag.x);
+    stage.scrollTop = drag.top - (event.clientY - drag.y);
+  });
+  stage.addEventListener('lostpointercapture', () => { drag = null; stage.classList.remove('is-panning'); });
   dialog.addEventListener('keydown', event => {
-    if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+    if (event.target === zoomInput) {
+      if (event.key === 'Enter') { event.preventDefault(); zoomInput.blur(); }
+      return;
+    }
+    if ((event.key === 'ArrowLeft' || event.key === 'ArrowRight') && event.target !== stage) {
       event.preventDefault();
       move(event.key === 'ArrowLeft' ? -1 : 1);
     }
+    if (event.key === '+' || event.key === '=') { event.preventDefault(); setZoom(zoom + 0.25); }
+    if (event.key === '-') { event.preventDefault(); setZoom(zoom - 0.25); }
+    if (event.key === '0') { event.preventDefault(); fit(); }
     if (event.key === 'Escape') event.stopPropagation();
   });
-  dialog.addEventListener('close', () => dialog.remove(), { once: true });
+  const resizeObserver = new ResizeObserver(() => { if (ready) fitted ? fit() : layout(); });
+  dialog.addEventListener('close', () => {
+    resizeObserver.disconnect();
+    document.body.style.overflow = previousOverflow;
+    const feedback = dialog.querySelector('.toast');
+    if (feedback) document.body.appendChild(feedback);
+    dialog.remove();
+    if (previousFocus?.isConnected) previousFocus.focus();
+  }, { once: true });
   document.body.appendChild(dialog);
-  update();
+  document.body.style.overflow = 'hidden';
   dialog.showModal();
+  resizeObserver.observe(stage);
+  update();
 }
 
 function toast(msg, icon) {
+  const container = document.querySelector('dialog[open]') || document.body;
   let t = $('.toast');
-  if (!t) { t = document.createElement('div'); t.className = 'toast'; document.body.appendChild(t); }
+  if (!t) { t = document.createElement('div'); t.className = 'toast'; }
+  if (t.parentElement !== container) container.appendChild(t);
   const iconHtml = icon ? `<span style="display:inline-flex;vertical-align:middle;margin-right:6px">${icon}</span>` : '';
   t.innerHTML = iconHtml + esc(msg);
   t.classList.add('show');
@@ -715,7 +897,7 @@ async function renderView(linkId) {
         data.files.forEach((f, i) => {
           const iconSvg = f.type?.startsWith('image/') ? Icons.image : Icons.download;
           html += `
-            <a class="file-attachment" href="${esc(f.url)}" target="_blank" rel="noopener" download>
+            <a class="file-attachment" href="${esc(f.url)}" data-file-index="${i}" download="${esc(attachmentDownloadName(f))}">
               <span class="file-attach-icon">${iconSvg}</span>
               <span class="file-attach-info">
                 <span class="file-attach-name">${esc(f.name)}</span>
@@ -957,6 +1139,12 @@ async function renderView(linkId) {
     }
 
     function bindViewActions() {
+      $$('.file-attachment[data-file-index]').forEach(link => {
+        link.onclick = event => {
+          event.preventDefault();
+          downloadAttachment(data.files[Number(link.dataset.fileIndex)], link);
+        };
+      });
       $$('.view-image').forEach(button => {
         button.onclick = () => openImageViewer(data.images, Number(button.dataset.imageIndex));
       });
