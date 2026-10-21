@@ -1,5 +1,5 @@
 // --- config ---
-const APP_VERSION = '1.4.7';
+const APP_VERSION = '1.4.8';
 const SUPABASE_URL = (localStorage.getItem('sb_url') || 'https://vhifkvzmujbhcdwjixdj.supabase.co').replace(/\/+$/, '');
 const SUPABASE_ANON_KEY = localStorage.getItem('sb_anon_key') || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZoaWZrdnptdWpiaGNkd2ppeGRqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE0ODgzOTYsImV4cCI6MjA5NzA2NDM5Nn0.nZ7zBk3p_Fh5Q88makO5OmHJFCJ2uG_0inIZ8kmq-zc';
 const configured = !!(SUPABASE_URL && SUPABASE_ANON_KEY);
@@ -392,7 +392,6 @@ function openImageViewer(images, startIndex) {
   `;
   const image = dialog.querySelector('img');
   const stage = dialog.querySelector('.image-viewer-stage');
-  const surface = dialog.querySelector('.image-viewer-surface');
   const status = dialog.querySelector('.image-viewer-status');
   const zoomInput = dialog.querySelector('[data-zoom-value]');
   const zoomIn = dialog.querySelector('[data-zoom-in]');
@@ -400,69 +399,27 @@ function openImageViewer(images, startIndex) {
   const fitButton = dialog.querySelector('[data-fit]');
   const actualButton = dialog.querySelector('[data-actual]');
   let index = Math.max(0, Math.min(images.length - 1, startIndex || 0));
-  let zoom = 1;
-  let ready = false;
-  let fitted = true;
-  let drag = null;
-  const syncControls = () => {
+  const viewport = createImageViewport(stage, image, ({ zoom, fitted, ready }) => {
     zoomInput.value = Math.round(zoom * 100);
     zoomInput.disabled = fitButton.disabled = actualButton.disabled = !ready;
     zoomIn.disabled = !ready || zoom >= 5;
     zoomOut.disabled = !ready || zoom <= 0.01;
     fitButton.setAttribute('aria-pressed', String(fitted));
     actualButton.setAttribute('aria-pressed', String(!fitted && zoom === 1));
-  };
-  const layout = () => {
-    const width = Math.round(image.naturalWidth * zoom);
-    const height = Math.round(image.naturalHeight * zoom);
-    image.style.width = `${width}px`;
-    image.style.height = `${height}px`;
-    surface.style.width = `${Math.max(stage.clientWidth, width)}px`;
-    surface.style.height = `${Math.max(stage.clientHeight, height)}px`;
-    stage.classList.toggle('can-pan', width > stage.clientWidth || height > stage.clientHeight);
-    syncControls();
-  };
-  const setZoom = (value, anchor) => {
-    if (!ready || !Number.isFinite(value)) { syncControls(); return; }
-    const rect = stage.getBoundingClientRect();
-    const x = anchor ? anchor.clientX - rect.left : stage.clientWidth / 2;
-    const y = anchor ? anchor.clientY - rect.top : stage.clientHeight / 2;
-    // Keep the same image point beneath the cursor as the scroll surface grows.
-    const imageX = (stage.scrollLeft + x - Math.max(0, (stage.clientWidth - image.naturalWidth * zoom) / 2)) / zoom;
-    const imageY = (stage.scrollTop + y - Math.max(0, (stage.clientHeight - image.naturalHeight * zoom) / 2)) / zoom;
-    zoom = Math.max(0.01, Math.min(5, Math.round(value * 100) / 100));
-    fitted = false;
-    layout();
-    stage.scrollLeft = imageX * zoom + Math.max(0, (stage.clientWidth - image.naturalWidth * zoom) / 2) - x;
-    stage.scrollTop = imageY * zoom + Math.max(0, (stage.clientHeight - image.naturalHeight * zoom) / 2) - y;
-  };
-  const fit = () => {
-    if (!ready) return;
-    zoom = Math.max(0.01, Math.floor(Math.min(1, stage.clientWidth / image.naturalWidth, stage.clientHeight / image.naturalHeight) * 100) / 100);
-    fitted = true;
-    layout();
-    stage.scrollLeft = stage.scrollTop = 0;
-  };
+  });
   image.onload = () => {
-    ready = true;
     status.textContent = '';
     image.hidden = false;
-    fit();
+    viewport.load();
   };
   image.onerror = () => {
-    ready = false;
     status.textContent = '图片加载失败';
-    syncControls();
+    viewport.reset();
   };
   const update = () => {
-    ready = false;
-    fitted = true;
+    viewport.reset();
     image.hidden = true;
     status.textContent = '加载中';
-    surface.style.width = surface.style.height = '100%';
-    stage.classList.remove('can-pan');
-    stage.scrollLeft = stage.scrollTop = 0;
-    syncControls();
     image.src = images[index];
     image.alt = `图片 ${index + 1}`;
     dialog.querySelector('.image-viewer-counter').textContent = `${index + 1} / ${images.length}`;
@@ -475,52 +432,37 @@ function openImageViewer(images, startIndex) {
   };
   dialog.querySelector('[data-prev]').onclick = () => move(-1);
   dialog.querySelector('[data-next]').onclick = () => move(1);
-  zoomIn.onclick = () => setZoom(zoom + 0.25);
-  zoomOut.onclick = () => setZoom(zoom - 0.25);
-  zoomInput.onchange = () => setZoom(zoomInput.value === '' ? NaN : Number(zoomInput.value) / 100);
-  fitButton.onclick = fit;
-  actualButton.onclick = () => setZoom(1);
+  zoomIn.onclick = () => viewport.setZoom(viewport.zoom + 0.25);
+  zoomOut.onclick = () => viewport.setZoom(viewport.zoom - 0.25);
+  zoomInput.onchange = () => viewport.setZoom(zoomInput.value === '' ? NaN : Number(zoomInput.value) / 100);
+  fitButton.onclick = viewport.fit;
+  actualButton.onclick = () => viewport.setZoom(1);
   dialog.querySelector('[data-download]').onclick = event => {
     downloadAttachment({ url: images[index], name: `图片-${index + 1}.jpg` }, event.currentTarget);
   };
   dialog.querySelector('[data-close]').onclick = () => dialog.close();
   dialog.onclick = event => { if (event.target === dialog) dialog.close(); };
-  dialog.addEventListener('wheel', event => {
-    if (!event.ctrlKey || !stage.contains(event.target)) return;
-    event.preventDefault();
-    if (event.deltaY) setZoom(zoom * (event.deltaY < 0 ? 1.1 : 1 / 1.1), event);
-  }, { passive: false });
-  stage.addEventListener('pointerdown', event => {
-    if (event.pointerType !== 'mouse' || event.button !== 0 || !stage.classList.contains('can-pan')) return;
-    event.preventDefault();
-    drag = { x: event.clientX, y: event.clientY, left: stage.scrollLeft, top: stage.scrollTop };
-    stage.setPointerCapture(event.pointerId);
-    stage.classList.add('is-panning');
-    stage.focus();
-  });
-  stage.addEventListener('pointermove', event => {
-    if (!drag) return;
-    stage.scrollLeft = drag.left - (event.clientX - drag.x);
-    stage.scrollTop = drag.top - (event.clientY - drag.y);
-  });
-  stage.addEventListener('lostpointercapture', () => { drag = null; stage.classList.remove('is-panning'); });
   dialog.addEventListener('keydown', event => {
     if (event.target === zoomInput) {
       if (event.key === 'Enter') { event.preventDefault(); zoomInput.blur(); }
       return;
     }
-    if ((event.key === 'ArrowLeft' || event.key === 'ArrowRight') && event.target !== stage) {
+    const arrowPan = { ArrowLeft: [48, 0], ArrowRight: [-48, 0], ArrowUp: [0, 48], ArrowDown: [0, -48] };
+    if (event.target === stage && arrowPan[event.key]) {
+      event.preventDefault();
+      viewport.pan(...arrowPan[event.key]);
+    } else if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
       event.preventDefault();
       move(event.key === 'ArrowLeft' ? -1 : 1);
     }
-    if (event.key === '+' || event.key === '=') { event.preventDefault(); setZoom(zoom + 0.25); }
-    if (event.key === '-') { event.preventDefault(); setZoom(zoom - 0.25); }
-    if (event.key === '0') { event.preventDefault(); fit(); }
+    if (event.key === '+' || event.key === '=') { event.preventDefault(); viewport.setZoom(viewport.zoom + 0.25); }
+    if (event.key === '-') { event.preventDefault(); viewport.setZoom(viewport.zoom - 0.25); }
+    if (event.key === '0') { event.preventDefault(); viewport.fit(); }
     if (event.key === 'Escape') event.stopPropagation();
   });
-  const resizeObserver = new ResizeObserver(() => { if (ready) fitted ? fit() : layout(); });
   dialog.addEventListener('close', () => {
-    resizeObserver.disconnect();
+    viewport.destroy();
+    image.onload = image.onerror = null;
     document.body.style.overflow = previousOverflow;
     const feedback = dialog.querySelector('.toast');
     if (feedback) document.body.appendChild(feedback);
@@ -530,7 +472,6 @@ function openImageViewer(images, startIndex) {
   document.body.appendChild(dialog);
   document.body.style.overflow = 'hidden';
   dialog.showModal();
-  resizeObserver.observe(stage);
   update();
 }
 

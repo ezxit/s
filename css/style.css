@@ -699,19 +699,26 @@ code {
 .image-viewer-scale { display: flex; align-items: center; height: 44px; width: 86px; padding-right: 8px; background: #222; border: 1px solid #555; border-radius: 4px; font-size: 14px; }
 .image-viewer-scale input { width: 100%; min-width: 0; height: 100%; padding: 0 2px 0 8px; border: 0; border-radius: 4px; background: transparent; color: #fff; font: inherit; text-align: right; appearance: textfield; box-shadow: none; }
 .image-viewer-scale input::-webkit-inner-spin-button, .image-viewer-scale input::-webkit-outer-spin-button { appearance: none; margin: 0; }
-.image-viewer-stage { position: relative; min-width: 0; min-height: 0; overflow: auto; overscroll-behavior: contain; touch-action: pan-x pan-y; }
+.image-viewer-stage { position: relative; min-width: 0; min-height: 0; overflow: hidden; overscroll-behavior: contain; touch-action: none; user-select: none; -webkit-user-select: none; }
 .image-viewer-stage:focus-visible { outline: 2px solid #aaa; outline-offset: -2px; }
 .image-viewer-stage.can-pan { cursor: grab; }
 .image-viewer-stage.is-panning { cursor: grabbing; user-select: none; }
-.image-viewer-surface { display: grid; place-items: center; }
+.image-viewer-surface { position: absolute; inset: 0; }
 .image-viewer-status { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; font-size: 14px; }
 .image-viewer-status:empty { display: none; }
 .image-next svg { transform: rotate(180deg); }
 .image-viewer-full {
+  position: absolute;
+  top: 0;
+  left: 0;
   display: block;
   max-width: none;
   max-height: none;
   object-fit: contain;
+  transform-origin: 0 0;
+  will-change: transform;
+  -webkit-user-drag: none;
+  -webkit-touch-callout: none;
 }
 .image-viewer-full[hidden] { display: none; }
 
