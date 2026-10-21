@@ -1,14 +1,14 @@
 // --- config ---
-const APP_VERSION = '1.4.8';
-const SUPABASE_URL = (localStorage.getItem('sb_url') || 'https://vhifkvzmujbhcdwjixdj.supabase.co').replace(/\/+$/, '');
-const SUPABASE_ANON_KEY = localStorage.getItem('sb_anon_key') || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZoaWZrdnptdWpiaGNkd2ppeGRqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE0ODgzOTYsImV4cCI6MjA5NzA2NDM5Nn0.nZ7zBk3p_Fh5Q88makO5OmHJFCJ2uG_0inIZ8kmq-zc';
-const configured = !!(SUPABASE_URL && SUPABASE_ANON_KEY);
+const APP_VERSION = '1.5.0';
+let SUPABASE_URL = ('https://vhifkvzmujbhcdwjixdj.supabase.co').replace(/\/+$/, '');
+let SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZoaWZrdnptdWpiaGNkd2ppeGRqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE0ODgzOTYsImV4cCI6MjA5NzA2NDM5Nn0.nZ7zBk3p_Fh5Q88makO5OmHJFCJ2uG_0inIZ8kmq-zc';
+let configured = !!(SUPABASE_URL && SUPABASE_ANON_KEY);
 
 async function sb(path, method, body) {
   const headers = supabaseHeaders();
   if (body) headers['Content-Type'] = 'application/json';
-  if (method === 'POST') headers['Prefer'] = 'return=representation';
-  const opts = { method, headers };
+  if (['POST', 'PATCH', 'DELETE'].includes(method)) headers['Prefer'] = 'return=representation';
+  const opts = { method, headers, signal: AbortSignal.timeout(30000) };
   if (body) opts.body = JSON.stringify(body);
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, opts);
   if (!res.ok) {
@@ -42,42 +42,6 @@ function incrementView(gistId) {
 }
 function getViewCount(gistId) {
   return getViews()[gistId] || 0;
-}
-
-// --- optimistic cache (bridges eventual-consistency gaps after mutations) ---
-const OPTI_CREATES_KEY = `opti_creates:${SUPABASE_URL}:${namespace}`;
-const OPTI_DELETES_KEY = `opti_deletes:${SUPABASE_URL}:${namespace}`;
-const OPTI_MAX_AGE_MS = 10 * 60 * 1000;
-
-function loadOptiCreates() {
-  try { return JSON.parse(sessionStorage.getItem(OPTI_CREATES_KEY) || '[]'); }
-  catch { return []; }
-}
-function saveOptiCreates(items) { sessionStorage.setItem(OPTI_CREATES_KEY, JSON.stringify(items)); }
-function loadOptiDeletes() {
-  try { return JSON.parse(sessionStorage.getItem(OPTI_DELETES_KEY) || '[]'); }
-  catch { return []; }
-}
-function saveOptiDeletes(ids) { sessionStorage.setItem(OPTI_DELETES_KEY, JSON.stringify(ids)); }
-
-function addOptiCreate(id, desc, date) {
-  const items = loadOptiCreates();
-  items.unshift({ id, desc, date, ts: Date.now() });
-  saveOptiCreates(items);
-}
-function addOptiDelete(id) {
-  const ids = loadOptiDeletes();
-  if (!ids.includes(id)) ids.push(id);
-  saveOptiDeletes(ids);
-}
-function cleanOptiState(apiIds) {
-  const now = Date.now();
-  let creates = loadOptiCreates();
-  creates = creates.filter(c => !apiIds.has(c.id) && (now - c.ts) < OPTI_MAX_AGE_MS);
-  saveOptiCreates(creates);
-  let deletes = loadOptiDeletes();
-  deletes = deletes.filter(id => apiIds.has(id));
-  saveOptiDeletes(deletes);
 }
 
 const THEMES = ['auto', 'daylight', 'linen', 'sepia', 'ocean', 'lavender', 'peach', 'cherry', 'midnight', 'cobalt', 'graphite'];
@@ -227,83 +191,6 @@ function storageObjectPath(path) {
   return `${STORAGE_BUCKET}/${path.split('/').map(encodeURIComponent).join('/')}`;
 }
 
-function newStoragePath(file) {
-  const folder = Array.from(new TextEncoder().encode(namespace), byte => byte.toString(16).padStart(2, '0')).join('');
-  const name = file.name.replace(/[^a-zA-Z0-9._-]/g, '_').slice(-100) || 'file';
-  return `ns-${folder}/${crypto.randomUUID()}_${name}`;
-}
-
-async function sbStorageUpload(file, path) {
-  const res = await fetch(
-    `${SUPABASE_URL}/storage/v1/object/${storageObjectPath(path)}`,
-    {
-      method: 'POST',
-      headers: {
-        ...supabaseHeaders(),
-        'Content-Type': file.type || 'application/octet-stream',
-      },
-      body: file,
-    }
-  );
-  if (!res.ok) {
-    const text = await res.text();
-    let msg;
-    try { const error = JSON.parse(text); msg = error.message || error.error || text; } catch { msg = text; }
-    if (/bucket.*not found/i.test(msg)) msg = '缺少 files 存储桶，请在 Supabase SQL Editor 运行 migration.sql';
-    else if (/row.level security|permission denied|unauthorized/i.test(msg) || res.status === 403) msg = '存储权限不足，请在 Supabase SQL Editor 运行 migration.sql';
-    else if (res.status === 413) msg = '文件超出 Supabase 存储桶的大小限制';
-    throw new Error(`上传失败: ${msg}`);
-  }
-  return res.json();
-}
-
-async function sbStorageDelete(path) {
-  const res = await fetch(
-    `${SUPABASE_URL}/storage/v1/object/${STORAGE_BUCKET}`,
-    {
-      method: 'DELETE',
-      headers: { ...supabaseHeaders(), 'Content-Type': 'application/json' },
-      body: JSON.stringify({ prefixes: [path] }),
-    }
-  );
-  if (!res.ok) {
-    const text = await res.text();
-    let msg;
-    try { msg = JSON.parse(text).message || text; } catch { msg = text; }
-    console.warn('删除存储文件失败:', msg);
-  }
-}
-
-function sbStoragePublicUrl(path) {
-  return `${SUPABASE_URL}/storage/v1/object/public/${storageObjectPath(path)}`;
-}
-
-async function cleanUploadedFiles(entries) {
-  await Promise.allSettled(entries.filter(f => f.key).map(f => sbStorageDelete(f.key)));
-}
-
-async function uploadAttachments(selectedFiles, onProgress) {
-  const oversized = selectedFiles.filter(file => file.size > MAX_ATTACHMENT_SIZE);
-  if (oversized.length) {
-    throw new Error(`${oversized.map(file => file.name).join(', ')} 超过 ${MAX_ATTACHMENT_SIZE_LABEL} 限制`);
-  }
-  const entries = [];
-  try {
-    onProgress(0, selectedFiles.length);
-    for (const file of selectedFiles) {
-      const path = newStoragePath(file);
-      try { await sbStorageUpload(file, path); }
-      catch (error) { throw new Error(`${file.name}: ${error.message}`); }
-      entries.push({ name: file.name, size: file.size, type: file.type, key: path, url: sbStoragePublicUrl(path) });
-      onProgress(entries.length, selectedFiles.length);
-    }
-    return entries;
-  } catch (error) {
-    await cleanUploadedFiles(entries);
-    throw error;
-  }
-}
-
 function attachmentDownloadName(file) {
   let name = typeof file.name === 'string' ? file.name : '';
   if (!name.trim()) {
@@ -315,49 +202,34 @@ function attachmentDownloadName(file) {
   return (name || 'download').replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_');
 }
 
+const activeDownloadControllers = new Set();
 async function downloadAttachment(file, control) {
   if (control?.dataset.downloading === 'true') return;
-  if (control) {
-    control.dataset.downloading = 'true';
-    control.setAttribute('aria-busy', 'true');
-    control.setAttribute('aria-disabled', 'true');
-  }
-  let objectUrl;
-  let link;
+  const controller = new AbortController();
+  activeDownloadControllers.add(controller);
+  const panel = document.createElement('div');
+  panel.className = 'download-progress'; panel.hidden = true;
+  panel.innerHTML = `<span class="download-name">${esc(file.name || '文件')}</span><progress max="100" value="0"></progress><span class="download-status" role="status"></span><button type="button" class="btn-sm">取消下载</button>`;
+  (document.querySelector('dialog[open]') || document.body).appendChild(panel);
+  const cancel = panel.querySelector('button');
+  cancel.onclick = () => controller.abort();
   try {
-    toast('正在准备下载…', Icons.download);
-    const response = await fetch(file.url, { credentials: 'omit' });
-    if (!response.ok) throw new Error(`请求失败 (${response.status})`);
-    // Cross-origin links ignore the download filename; a local Blob URL retains it.
-    objectUrl = URL.createObjectURL(await response.blob());
-    link = document.createElement('a');
-    link.href = objectUrl;
-    link.download = attachmentDownloadName(file);
-    document.body.appendChild(link);
-    link.click();
-    toast('已开始下载', Icons.check);
+    await ShortlinkTransfers.download(file, {control,signal:controller.signal,onStatus: status => {
+      if (status.phase === 'delegated') { toast(status.message, Icons.download); return; }
+      panel.hidden = false;
+      panel.querySelector('.download-status').textContent = status.total ? `${status.message} ${formatSize(status.loaded)} / ${formatSize(status.total)}` : status.message;
+      panel.querySelector('progress').value = status.total ? status.loaded * 100 / status.total : 0;
+    }});
+    if (panel.hidden) panel.remove();
+    else { cancel.textContent = '完成'; cancel.onclick = () => panel.remove(); setTimeout(() => panel.remove(),8000); }
   } catch (error) {
-    toast(`下载失败：${error.message || '请检查网络后重试'}`, Icons.alert);
-  } finally {
-    link?.remove();
-    if (objectUrl) setTimeout(() => URL.revokeObjectURL(objectUrl), 60000);
-    if (control) {
-      delete control.dataset.downloading;
-      control.removeAttribute('aria-busy');
-      control.removeAttribute('aria-disabled');
-    }
-  }
+    panel.hidden=false;
+    panel.querySelector('.download-status').textContent = error.name === 'AbortError' ? '下载已取消，原文件仍保留。' : `下载失败：${error.message}`;
+    cancel.textContent='重试'; cancel.onclick=()=>{panel.remove();downloadAttachment(file,control);};
+    const close=document.createElement('button');close.className='btn-sm';close.textContent='关闭';close.onclick=()=>panel.remove();panel.append(close);
+  } finally { activeDownloadControllers.delete(controller); }
 }
-
-function myLinksUrl(ns = namespace) {
-  return `?user=${encodeURIComponent(ns)}`;
-}
-
-function setEditorBusy(editor, busy) {
-  editor.inert = busy;
-  editor.setAttribute('aria-busy', String(busy));
-  editor.querySelectorAll('input, textarea, button').forEach(control => { control.disabled = busy; });
-}
+function myLinksUrl(ns = namespace) { return navUrl({user:ns}); }
 
 function openImageViewer(images, startIndex) {
   if (!images.length) return;
@@ -399,6 +271,7 @@ function openImageViewer(images, startIndex) {
   const fitButton = dialog.querySelector('[data-fit]');
   const actualButton = dialog.querySelector('[data-actual]');
   let index = Math.max(0, Math.min(images.length - 1, startIndex || 0));
+  let loadingController, originalObjectUrl, imageRequest = 0;
   const viewport = createImageViewport(stage, image, ({ zoom, fitted, ready }) => {
     zoomInput.value = Math.round(zoom * 100);
     zoomInput.disabled = fitButton.disabled = actualButton.disabled = !ready;
@@ -416,15 +289,28 @@ function openImageViewer(images, startIndex) {
     status.textContent = '图片加载失败';
     viewport.reset();
   };
-  const update = () => {
+  const update = async () => {
+    const request = ++imageRequest;
+    loadingController?.abort(); loadingController = new AbortController();
+    if (originalObjectUrl) { URL.revokeObjectURL(originalObjectUrl); originalObjectUrl = null; }
+    image.removeAttribute('src');
     viewport.reset();
     image.hidden = true;
     status.textContent = '加载中';
-    image.src = images[index];
+    const info = imageInfo(images[index], index);
     image.alt = `图片 ${index + 1}`;
     dialog.querySelector('.image-viewer-counter').textContent = `${index + 1} / ${images.length}`;
     dialog.querySelector('[data-prev]').disabled = index === 0;
     dialog.querySelector('[data-next]').disabled = index === images.length - 1;
+    try {
+      if (info.segmented) {
+        const blob = await ShortlinkTransfers.readBlob(info,{signal:loadingController.signal,onProgress:progress=>{
+          if(request===imageRequest)status.textContent=`正在读取原图 ${formatSize(progress.loaded)} / ${formatSize(progress.total)}`;
+        }});
+        if(request!==imageRequest || !dialog.open)return;
+        originalObjectUrl=URL.createObjectURL(blob);image.src=originalObjectUrl;
+      } else image.src = info.url;
+    } catch(error) {if(error.name!=='AbortError' && request===imageRequest)status.textContent=`原图读取失败：${error.message}`;}
   };
   const move = delta => {
     const next = Math.max(0, Math.min(images.length - 1, index + delta));
@@ -438,11 +324,12 @@ function openImageViewer(images, startIndex) {
   fitButton.onclick = viewport.fit;
   actualButton.onclick = () => viewport.setZoom(1);
   dialog.querySelector('[data-download]').onclick = event => {
-    downloadAttachment({ url: images[index], name: `图片-${index + 1}.jpg` }, event.currentTarget);
+    downloadAttachment(imageInfo(images[index], index), event.currentTarget);
   };
   dialog.querySelector('[data-close]').onclick = () => dialog.close();
   dialog.onclick = event => { if (event.target === dialog) dialog.close(); };
   dialog.addEventListener('keydown', event => {
+    if (event.key === 'Escape') { event.stopPropagation(); return; }
     if (event.target === zoomInput) {
       if (event.key === 'Enter') { event.preventDefault(); zoomInput.blur(); }
       return;
@@ -461,11 +348,14 @@ function openImageViewer(images, startIndex) {
     if (event.key === 'Escape') event.stopPropagation();
   });
   dialog.addEventListener('close', () => {
+    ++imageRequest; loadingController?.abort();
+    if(originalObjectUrl)URL.revokeObjectURL(originalObjectUrl);
     viewport.destroy();
     image.onload = image.onerror = null;
     document.body.style.overflow = previousOverflow;
     const feedback = dialog.querySelector('.toast');
     if (feedback) document.body.appendChild(feedback);
+    dialog.querySelectorAll('.download-progress').forEach(panel => document.body.appendChild(panel));
     dialog.remove();
     if (previousFocus?.isConnected) previousFocus.focus();
   }, { once: true });
@@ -487,36 +377,6 @@ function toast(msg, icon) {
   t._tid = setTimeout(() => t.classList.remove('show'), 3000);
 }
 
-// --- image compression ---
-function compressImage(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(new Error(`${file.name}: 图片读取失败`));
-    reader.onload = e => {
-      const img = new Image();
-      img.onerror = () => reject(new Error(`${file.name}: 图片格式有误或暂不支持`));
-      img.onload = () => {
-        try {
-          const MAX = 1600;
-          let { width, height } = img;
-          if (width > MAX || height > MAX) {
-            const ratio = Math.min(MAX / width, MAX / height);
-            width = Math.round(width * ratio);
-            height = Math.round(height * ratio);
-          }
-          const canvas = document.createElement('canvas');
-          canvas.width = width;
-          canvas.height = height;
-          canvas.getContext('2d').drawImage(img, 0, 0, width, height);
-          resolve(canvas.toDataURL('image/jpeg', 0.8));
-        } catch (error) { reject(error); }
-      };
-      img.src = e.target.result;
-    };
-    reader.readAsDataURL(file);
-  });
-}
-
 // --- render ---
 function render() {
   const params = new URLSearchParams(location.search);
@@ -526,11 +386,11 @@ function render() {
   const activePage = page === 'settings' ? 'settings' : (sid ? 'view' : (user ? 'list' : 'home'));
   app.dataset.page = activePage;
   $('#site-header').innerHTML = `
-    <a class="site-brand" href="." aria-label="shortlink 首页"><span class="brand-mark" aria-hidden="true">S</span><span>shortlink<span class="brand-caption">A SMALL PLACE TO SHARE</span></span></a>
+    <a class="site-brand" href="${esc(navUrl({}))}" aria-label="shortlink 首页"><span class="brand-mark" aria-hidden="true">S</span><span>shortlink<span class="brand-caption">A SMALL PLACE TO SHARE</span></span></a>
     <nav class="site-nav" aria-label="主导航">
-      <a href="." ${activePage === 'home' ? 'aria-current="page"' : ''}>创建</a>
+      <a href="${esc(navUrl({}))}" ${activePage === 'home' ? 'aria-current="page"' : ''}>创建</a>
       <a href="${myLinksUrl()}" ${activePage === 'list' ? 'aria-current="page"' : ''}>我的短链接</a>
-      <a href="?page=settings" aria-label="设置" ${activePage === 'settings' ? 'aria-current="page"' : ''}>${Icons.settings}<span>设置</span></a>
+      <a href="${esc(navUrl({page:'settings'}))}" aria-label="设置" ${activePage === 'settings' ? 'aria-current="page"' : ''}>${Icons.settings}<span>设置</span></a>
     </nav>`;
 
   if (page === 'settings') return renderSettings();
@@ -553,811 +413,13 @@ function renderSetup() {
       <input id="sb-key-input" type="password" placeholder="eyJhbGciOiJIUzI1NiIs..." autocomplete="off">
       <label class="input-label spacer-sm" for="sb-ns-input">Namespace（你的用户名，用于管理短链接）</label>
       <input id="sb-ns-input" type="text" placeholder="my-space" autocomplete="off" value="${esc(namespace)}">
-      <p class="dim spacer-sm" style="display:flex;align-items:center;gap:6px">${Icons.shield} 配置只存在你浏览器里，不会上传到任何地方。</p>
+      <p class="dim spacer-sm" style="display:flex;align-items:center;gap:6px">${Icons.shield} 请仅填写公开 Key。分享自定义连接时，公开连接信息会随链接提供。</p>
       <button class="btn btn-primary spacer" id="save-config" style="width:100%">
         ${Icons.key} 保存配置
       </button>
     </div>
   `;
   $('#save-config').onclick = saveConnection;
-}
-
-// -- home page --
-let uploadFiles = [];
-
-function renderHome() {
-  app.innerHTML = `
-    <div class="home-layout">
-    <section class="home-intro fade-in" aria-labelledby="home-title">
-      <p class="eyebrow"><span></span> A LITTLE SPACE FOR EVERYTHING</p>
-      <h1 id="home-title">小小链接，<br>装下<span>此刻。</span></h1>
-      <p class="intro-copy">一段文字，几张照片，或一份文件。<br>放在一起，再用一个链接分享出去。</p>
-      <div class="intro-rule"></div>
-      <p class="intro-note">简单记录，轻轻分享。</p>
-      <div class="quick-appearance">
-        <p class="eyebrow">换一种心情</p>
-        <div class="quick-theme-list" aria-label="快速切换主题">
-          ${['daylight', 'linen', 'sepia', 'lavender', 'peach', 'cobalt', 'graphite'].map(theme => `
-            <button type="button" class="quick-theme" data-theme-choice="${theme}" data-preview-theme="${theme}" aria-label="切换到${THEME_PREVIEWS[theme].label}主题" aria-pressed="${getTheme() === theme}" title="${THEME_PREVIEWS[theme].label}"><span></span></button>
-          `).join('')}
-          <a class="all-themes" href="?page=settings" aria-label="查看全部主题">全部 ${Icons.externalLink}</a>
-        </div>
-      </div>
-    </section>
-    <div class="card composer-card fade-in">
-      <div class="composer-heading"><div><span class="eyebrow">NEW SHORTLINK</span><h2>创建一份分享</h2></div><span class="composer-index" aria-hidden="true">01 /</span></div>
-      <div class="composer-grid">
-      <section class="compose-content">
-      <label class="input-label" for="text-input">内容</label>
-      <textarea id="text-input" placeholder="从一句想分享的话开始…"></textarea>
-      <div class="flex spacer-sm">
-        <button type="button" class="file-label" id="choose-images" aria-label="添加图片">
-          ${Icons.image} 添加图片
-        </button>
-        <input type="file" id="file-input" accept="image/*" multiple hidden>
-        <span class="muted" id="img-count"></span>
-      </div>
-      <div class="previews" id="previews"></div>
-      </section>
-      <section class="compose-attachments">
-      <div class="attachment-heading"><span class="input-label">文件附件</span><span class="dim">单个最大 200 MB</span></div>
-      <button type="button" class="attachment-drop-zone" id="upload-drop-zone" aria-label="选择文件或将文件拖入此处" aria-describedby="upload-drop-hint">
-        <span class="drop-symbol" aria-hidden="true">${Icons.upload}</span>
-        <span class="drop-title">把文件拖到这里</span>
-        <span class="drop-hint" id="upload-drop-hint">或点击选择文件 · 支持多个文件</span>
-      </button>
-      <input type="file" id="upload-file-input" multiple hidden>
-      <span class="muted upload-count" id="upload-file-count" role="status"></span>
-      <div class="upload-previews" id="upload-previews"></div>
-      </section>
-      </div>
-      <div class="composer-bottom"><span class="compose-footnote">准备好了，就分享吧。</span>
-      <button class="btn btn-primary" id="create-btn">
-        创建短链接 <span aria-hidden="true">↗</span>
-      </button>
-      </div>
-      <div class="result spacer" id="result">
-        <div class="success-text">${Icons.check} 创建成功</div>
-        <a class="result-url" id="result-url" href="" target="_blank" rel="noopener"></a>
-        <div class="flex spacer-sm">
-          <button class="btn-sm" id="copy-btn" aria-label="复制链接">${Icons.copy} 复制</button>
-          <button class="btn-sm" id="new-btn">${Icons.plus} 再创建一个</button>
-        </div>
-      </div>
-    </div>
-    </div>
-  `;
-  files = [];
-  uploadFiles = [];
-  renderPreviews();
-  renderUploadPreviews();
-  bindHomeEvents();
-}
-
-function renderUploadPreviews() {
-  const container = $('#upload-previews');
-  if (!container) return;
-  container.innerHTML = '';
-  const count = $('#upload-file-count');
-  if (count) count.textContent = uploadFiles.length ? `${uploadFiles.length} 个文件` : '';
-
-  uploadFiles.forEach((f, i) => {
-    const wrap = document.createElement('div');
-    wrap.className = 'upload-item fade-in';
-    wrap.innerHTML = `
-      <div class="upload-item-icon">${Icons.upload}</div>
-      <div class="upload-item-info">
-        <span class="upload-item-name">${esc(f.name)}</span>
-        <span class="upload-item-size">${formatSize(f.size)}</span>
-      </div>
-      <button class="upload-item-del" data-idx="${i}" aria-label="移除文件">${Icons.close}</button>
-    `;
-    wrap.querySelector('.upload-item-del').onclick = () => {
-      uploadFiles.splice(i, 1);
-      renderUploadPreviews();
-    };
-    container.appendChild(wrap);
-  });
-}
-
-function bindHomeEvents() {
-  const fi = $('#file-input');
-  $('#choose-images').onclick = () => fi.click();
-  fi.onchange = () => {
-    files.push(...fi.files);
-    fi.value = '';
-    renderPreviews();
-  };
-
-  const ufi = $('#upload-file-input');
-  $('#upload-drop-zone').onclick = () => ufi.click();
-  ufi.onchange = () => {
-    addAttachmentFiles(ufi.files, uploadFiles, renderUploadPreviews, ufi);
-  };
-  bindAttachmentDropZone($('#upload-drop-zone'), ufi, selected => addAttachmentFiles(selected, uploadFiles, renderUploadPreviews, ufi));
-  enableWindowFileDropGuard();
-
-  $('#create-btn').onclick = createShortlink;
-  $$('[data-theme-choice]').forEach(button => {
-    button.onclick = () => setTheme(button.dataset.themeChoice);
-  });
-}
-
-function renderPreviews() {
-  const container = $('#previews');
-  if (!container) return;
-  container.innerHTML = '';
-  const imgCount = $('#img-count');
-  if (imgCount) imgCount.textContent = files.length ? `${files.length} 张` : '';
-
-  files.forEach((f, i) => {
-    const r = new FileReader();
-    r.onload = e => {
-      const wrap = document.createElement('div');
-      wrap.className = 'wrap';
-      wrap.setAttribute('tabindex', '0');
-      wrap.setAttribute('aria-label', `图片 ${i + 1}，点击删除`);
-      wrap.innerHTML = `<img src="${e.target.result}" alt="预览图片 ${i + 1}"><button class="del" aria-label="删除图片">&times;</button>`;
-      wrap.querySelector('.del').onclick = ev => {
-        ev.stopPropagation();
-        files.splice(i, 1);
-        renderPreviews();
-      };
-      wrap.onclick = () => {
-        files.splice(i, 1);
-        renderPreviews();
-      };
-      container.appendChild(wrap);
-    };
-    r.readAsDataURL(f);
-  });
-}
-
-async function createShortlink() {
-  const btn = $('#create-btn');
-  const editor = btn.closest('.card');
-  const origHTML = btn.innerHTML;
-  let uploadedEntries = [];
-  setEditorBusy(editor, true);
-  btn.innerHTML = `<span class="spinner"></span> 创建中...`;
-  $('#result').style.display = 'none';
-
-  try {
-    const text = $('#text-input').value.trim();
-    if (!text && !files.length && !uploadFiles.length) {
-      throw new Error('至少写点文字、传张图片或上传文件');
-    }
-    const images = await Promise.all(files.map(compressImage));
-
-    // Upload files to Supabase Storage
-    const fileEntries = await uploadAttachments([...uploadFiles], (done, total) => {
-      if (total) btn.innerHTML = `<span class="spinner"></span> 上传文件中 (${done}/${total})...`;
-    });
-    uploadedEntries = fileEntries;
-
-    const preview = text ? text.slice(0, 60).replace(/\n/g, ' ') :
-      (images.length ? `[${images.length} images]` :
-        (fileEntries.length ? `[${fileEntries.length} files]` : ''));
-    const created = new Date().toISOString();
-
-    const rows = await sb('shortlinks', 'POST', {
-      text,
-      images,
-      files: fileEntries,
-      description: preview,
-      namespace,
-      created,
-      created_at: created
-    });
-
-    if (!rows?.[0]?.id) throw new Error('创建失败');
-    uploadedEntries = [];
-
-    addOptiCreate(rows[0].id, preview, created);
-
-    const url = `${location.origin}${location.pathname}?s=${rows[0].id}`;
-    $('#result-url').href = url;
-    $('#result-url').textContent = url;
-    $('#result').style.display = 'block';
-    $('#text-input').value = '';
-    files = [];
-    uploadFiles = [];
-    renderPreviews();
-    renderUploadPreviews();
-
-    $('#copy-btn').onclick = () => { navigator.clipboard.writeText(url); toast('已复制', Icons.check); };
-    $('#new-btn').onclick = () => { $('#result').style.display = 'none'; };
-  } catch (err) {
-    await cleanUploadedFiles(uploadedEntries);
-    toast(err.message, Icons.alert);
-    console.error(err);
-  }
-  setEditorBusy(editor, false);
-  btn.innerHTML = origHTML;
-}
-
-// -- view page --
-function skeletonView() {
-  return `
-    <div class="card fade-in">
-      <div class="skeleton skeleton-text" style="width:50%;height:14px"></div>
-      <div class="skeleton skeleton-text" style="width:30%;height:14px;margin-bottom:16px"></div>
-      <div class="skeleton skeleton-block"></div>
-    </div>
-  `;
-}
-
-async function renderView(linkId) {
-  app.innerHTML = skeletonView();
-  const returnUrl = myLinksUrl(new URLSearchParams(location.search).get('user') || namespace);
-
-  try {
-    const rows = await sb(`shortlinks?id=eq.${encodeURIComponent(linkId)}&limit=1`, 'GET');
-    const data = rows?.[0];
-
-    if (!data) {
-      return (app.innerHTML = `
-        <div class="card fade-in">
-          <div class="empty-state">
-            ${Icons.file}
-            <p>内容不存在</p>
-            <a class="btn btn-secondary" href="${esc(returnUrl)}">${Icons.arrowLeft} 返回我的短链接</a>
-          </div>
-        </div>`);
-    }
-
-    incrementView(linkId);
-    const date = data.created ? data.created.slice(0, 16).replace('T', ' ') : '';
-    let editFiles = [];
-    let editImages = [];
-    let editUploadFiles = [];
-    let newEditUploadFiles = [];
-    let removedExistingKeys;
-
-    function renderViewMode() {
-      let html = `
-        <div class="card fade-in">
-        <div class="view-meta">
-          ${Icons.link}
-          <span>s/</span><span class="gist-id">${esc(linkId)}</span>
-          <span>&middot;</span>
-          <span>${esc(date)}</span>
-        </div>
-      `;
-
-      if (data.text) html += `<div class="view-text">${esc(data.text)}</div>`;
-      if (data.images?.length) {
-        html += `<div class="view-images">`;
-        data.images.forEach((img, i) => {
-          html += `<button type="button" class="view-image" data-image-index="${i}" aria-label="查看原图 ${i + 1}"><img src="${esc(img)}" alt="图片 ${i + 1}" loading="lazy"></button>`;
-        });
-        html += `</div>`;
-      }
-      if (data.files?.length) {
-        html += `<div class="view-files">`;
-        data.files.forEach((f, i) => {
-          const iconSvg = f.type?.startsWith('image/') ? Icons.image : Icons.download;
-          html += `
-            <a class="file-attachment" href="${esc(f.url)}" data-file-index="${i}" download="${esc(attachmentDownloadName(f))}">
-              <span class="file-attach-icon">${iconSvg}</span>
-              <span class="file-attach-info">
-                <span class="file-attach-name">${esc(f.name)}</span>
-                <span class="file-attach-size">${formatSize(f.size)}</span>
-              </span>
-              ${Icons.download}
-            </a>
-          `;
-        });
-        html += `</div>`;
-      }
-      if (!data.text && !data.images?.length && !data.files?.length) {
-        html += `<div class="empty-state"><p class="muted">没有内容</p></div>`;
-      }
-
-      html += `<div class="spacer view-actions">`;
-      html += `<a class="btn btn-secondary btn-sm" href="${esc(returnUrl)}">${Icons.arrowLeft} 返回我的短链接</a>`;
-      html += `<button class="btn btn-ghost btn-sm" id="edit-btn">${Icons.settings} 编辑</button>`;
-      html += `<button class="btn btn-danger btn-sm" id="delete-link" aria-label="删除此短链接">${Icons.trash} 删除</button>`;
-      html += `</div></div>`;
-      app.innerHTML = html;
-      bindViewActions();
-    }
-
-    function renderEditUploadPreviews() {
-      const c = $('#edit-upload-previews');
-      if (!c) return;
-      c.innerHTML = '';
-      const count = $('#edit-upload-count');
-      if (count) count.textContent = newEditUploadFiles.length ? `${newEditUploadFiles.length} 个新文件` : '';
-
-      // Show existing files still kept
-      editUploadFiles.forEach((f, i) => {
-        if (removedExistingKeys.has(f.key)) return;
-        const wrap = document.createElement('div');
-        wrap.className = 'upload-item fade-in';
-        wrap.innerHTML = `
-          <div class="upload-item-icon">${Icons.download}</div>
-          <div class="upload-item-info">
-            <span class="upload-item-name">${esc(f.name)}</span>
-            <span class="upload-item-size">${formatSize(f.size)}</span>
-          </div>
-          <button class="upload-item-del" aria-label="移除文件">${Icons.close}</button>
-        `;
-        wrap.querySelector('.upload-item-del').onclick = () => {
-          removedExistingKeys.add(f.key);
-          renderEditUploadPreviews();
-        };
-        c.appendChild(wrap);
-      });
-
-      // Show newly added files
-      newEditUploadFiles.forEach((f, i) => {
-        const wrap = document.createElement('div');
-        wrap.className = 'upload-item fade-in';
-        wrap.innerHTML = `
-          <div class="upload-item-icon">${Icons.upload}</div>
-          <div class="upload-item-info">
-            <span class="upload-item-name">${esc(f.name)}</span>
-            <span class="upload-item-size">${formatSize(f.size)}</span>
-            <span class="upload-item-new">新文件</span>
-          </div>
-          <button class="upload-item-del" aria-label="移除文件">${Icons.close}</button>
-        `;
-        wrap.querySelector('.upload-item-del').onclick = () => {
-          newEditUploadFiles.splice(i, 1);
-          renderEditUploadPreviews();
-        };
-        c.appendChild(wrap);
-      });
-    }
-
-    function renderEditMode() {
-      editFiles = [];
-      editImages = [...(data.images || [])];
-      editUploadFiles = data.files ? [...data.files] : [];
-      newEditUploadFiles = [];
-      removedExistingKeys = new Set();
-
-      let html = `
-        <div class="card fade-in">
-        <div class="view-meta">
-          ${Icons.settings}
-          <span>编辑</span>
-          <span>&middot;</span>
-          <span class="gist-id">s/${esc(linkId).slice(0, 8)}</span>
-        </div>
-        <label class="input-label" for="edit-text">文字内容</label>
-        <textarea id="edit-text" placeholder="写点什么...">${esc(data.text || '')}</textarea>
-        <div class="flex spacer-sm">
-          <button type="button" class="file-label" id="edit-choose-images" aria-label="添加新图片">
-            ${Icons.image} 添加图片
-          </button>
-          <input type="file" id="edit-file-input" accept="image/*" multiple hidden>
-          <span class="muted" id="edit-img-count"></span>
-        </div>
-        <div class="previews" id="edit-previews"></div>
-
-        <hr class="divider">
-        <label class="input-label">文件附件（单个最大 200 MB）</label>
-        <button type="button" class="attachment-drop-zone" id="edit-upload-drop-zone" aria-label="添加文件或将文件拖入此处" aria-describedby="edit-upload-drop-hint">
-          <span class="drop-symbol" aria-hidden="true">${Icons.upload}</span>
-          <span class="drop-title">把文件拖到这里</span>
-          <span class="drop-hint" id="edit-upload-drop-hint">或点击选择文件 · 支持多个文件</span>
-        </button>
-        <input type="file" id="edit-upload-file-input" multiple hidden>
-        <span class="muted upload-count" id="edit-upload-count" role="status"></span>
-        <div class="upload-previews" id="edit-upload-previews"></div>
-      `;
-
-      if (data.images?.length) {
-        html += `<p class="dim spacer-sm">已有图片（点击删除）</p>`;
-        html += `<div class="previews" id="existing-previews">`;
-        data.images.forEach((img, i) => {
-          html += `
-            <div class="wrap edit-wrap" tabindex="0" data-idx="${i}" aria-label="删除已有图片 ${i + 1}">
-              <img src="${img}" alt="已有图片 ${i + 1}">
-              <button class="del" aria-label="删除图片">&times;</button>
-            </div>`;
-        });
-        html += `</div>`;
-      }
-
-      html += `<div class="flex spacer" style="gap:8px">`;
-      html += `<button class="btn btn-primary btn-sm" id="save-edit-btn">${Icons.check} 保存修改</button>`;
-      html += `<button class="btn btn-secondary btn-sm" id="cancel-edit-btn">取消</button>`;
-      html += `</div></div>`;
-      app.innerHTML = html;
-      bindEditActions();
-      renderEditUploadPreviews();
-    }
-
-    function renderEditPreviews() {
-      const c = $('#edit-previews');
-      if (!c) return;
-      c.innerHTML = '';
-      const count = $('#edit-img-count');
-      if (count) count.textContent = editFiles.length ? `${editFiles.length} 张新图片` : '';
-      editFiles.forEach((f, i) => {
-        const r = new FileReader();
-        r.onload = e => {
-          const wrap = document.createElement('div');
-          wrap.className = 'wrap';
-          wrap.setAttribute('tabindex', '0');
-          wrap.setAttribute('aria-label', `新图片 ${i + 1}，点击删除`);
-          wrap.innerHTML = `<img src="${e.target.result}" alt="新图片 ${i + 1}"><button class="del" aria-label="删除图片">&times;</button>`;
-          wrap.querySelector('.del').onclick = ev => { ev.stopPropagation(); editFiles.splice(i, 1); renderEditPreviews(); };
-          wrap.onclick = () => { editFiles.splice(i, 1); renderEditPreviews(); };
-          c.appendChild(wrap);
-        };
-        r.readAsDataURL(f);
-      });
-    }
-
-    function bindEditActions() {
-      const efi = $('#edit-file-input');
-      if (efi) {
-        $('#edit-choose-images').onclick = () => efi.click();
-        efi.onchange = () => {
-          editFiles.push(...efi.files);
-          efi.value = '';
-          renderEditPreviews();
-        };
-      }
-
-      const eufi = $('#edit-upload-file-input');
-      if (eufi) {
-        $('#edit-upload-drop-zone').onclick = () => eufi.click();
-        eufi.onchange = () => {
-          addAttachmentFiles(eufi.files, newEditUploadFiles, renderEditUploadPreviews, eufi);
-        };
-        bindAttachmentDropZone($('#edit-upload-drop-zone'), eufi, selected => addAttachmentFiles(selected, newEditUploadFiles, renderEditUploadPreviews, eufi));
-        enableWindowFileDropGuard();
-      }
-
-      $$('#existing-previews .edit-wrap').forEach(wrap => {
-        wrap.onclick = () => {
-          const idx = parseInt(wrap.dataset.idx);
-          editImages.splice(idx, 1);
-          wrap.remove();
-          $$('#existing-previews .edit-wrap').forEach((item, index) => { item.dataset.idx = index; });
-        };
-      });
-
-      $('#save-edit-btn').onclick = async () => {
-        const btn = $('#save-edit-btn');
-        const editor = btn.closest('.card');
-        let uploadedEntries = [];
-        setEditorBusy(editor, true);
-        btn.innerHTML = `<span class="spinner"></span> 保存中...`;
-
-        try {
-          const textVal = $('#edit-text').value.trim();
-          if (!textVal && !editImages.length && !editFiles.length && !newEditUploadFiles.length && editUploadFiles.filter(f => !removedExistingKeys.has(f.key)).length === 0) {
-            throw new Error('至少需要文字、图片或文件');
-          }
-
-          const newImages = editFiles.length ? await Promise.all(editFiles.map(compressImage)) : [];
-          const newText = textVal;
-          const newImagesArr = [...editImages, ...newImages];
-
-          // Upload new files
-          const newFileEntries = await uploadAttachments([...newEditUploadFiles], (done, total) => {
-            if (total) btn.innerHTML = `<span class="spinner"></span> 上传文件 (${done}/${total})...`;
-          });
-          uploadedEntries = newFileEntries;
-
-          // Build final files array: keep existing not removed + new uploads
-          const keptFiles = editUploadFiles.filter(f => !removedExistingKeys.has(f.key));
-          const finalFiles = [...keptFiles, ...newFileEntries];
-
-          const desc = newText ? newText.slice(0, 60).replace(/\n/g, ' ') :
-            (newImagesArr.length ? `[${newImagesArr.length} images]` :
-              (finalFiles.length ? `[${finalFiles.length} files]` : ''));
-
-          await sb(`shortlinks?id=eq.${encodeURIComponent(linkId)}`, 'PATCH', {
-            text: newText,
-            images: newImagesArr,
-            files: finalFiles,
-            description: desc
-          });
-          uploadedEntries = [];
-          cleanUploadedFiles(editUploadFiles.filter(f => removedExistingKeys.has(f.key)));
-
-          toast('已保存', Icons.check);
-          data.text = newText;
-          data.images = newImagesArr;
-          data.files = finalFiles;
-          renderViewMode();
-        } catch (err) {
-          await cleanUploadedFiles(uploadedEntries);
-          toast(err.message, Icons.alert);
-        }
-        setEditorBusy(editor, false);
-        btn.innerHTML = `${Icons.check} 保存修改`;
-      };
-
-      $('#cancel-edit-btn').onclick = () => renderViewMode();
-    }
-
-    function bindViewActions() {
-      $$('.file-attachment[data-file-index]').forEach(link => {
-        link.onclick = event => {
-          event.preventDefault();
-          downloadAttachment(data.files[Number(link.dataset.fileIndex)], link);
-        };
-      });
-      $$('.view-image').forEach(button => {
-        button.onclick = () => openImageViewer(data.images, Number(button.dataset.imageIndex));
-      });
-      $('#edit-btn').onclick = () => renderEditMode();
-      const del = $('#delete-link');
-      if (del) {
-        let deleteConfirming = false;
-        del.onclick = async e => {
-          e.preventDefault();
-          if (!deleteConfirming) {
-            deleteConfirming = true;
-            del.classList.add('btn-danger-solid');
-            del.innerHTML = `${Icons.alert} 确认删除`;
-            const cancelBtn = document.createElement('button');
-            cancelBtn.className = 'btn btn-ghost btn-sm';
-            cancelBtn.id = 'delete-cancel-btn';
-            cancelBtn.innerHTML = '取消';
-            cancelBtn.onclick = ev => {
-              ev.preventDefault();
-              ev.stopPropagation();
-              deleteConfirming = false;
-              del.classList.remove('btn-danger-solid');
-              del.innerHTML = `${Icons.trash} 删除`;
-              cancelBtn.remove();
-            };
-            del.parentNode.insertBefore(cancelBtn, del.nextSibling);
-            return;
-          }
-          try {
-            await sb(`shortlinks?id=eq.${encodeURIComponent(linkId)}`, 'DELETE');
-            cleanUploadedFiles(data.files || []);
-
-            addOptiDelete(linkId);
-            app.innerHTML = `
-              <div class="card fade-in">
-                <div class="empty-state">
-                  ${Icons.check}
-                  <p style="font-weight:600;color:var(--color-text)">已删除</p>
-                  <p class="muted">s/${esc(linkId).slice(0, 12)} 已被永久删除</p>
-                  <div class="flex" style="justify-content:center;flex-wrap:wrap">
-                    <a class="btn btn-secondary btn-sm" href="${esc(returnUrl)}">${Icons.arrowLeft} 返回我的短链接</a>
-                  </div>
-                </div>
-              </div>
-            `;
-          } catch (err) { toast(err.message, Icons.alert); }
-        };
-      }
-    }
-
-    renderViewMode();
-  } catch (err) {
-    app.innerHTML = `
-      <div class="card fade-in">
-        <div class="empty-state">
-          ${Icons.alert}
-          <p>${esc(err.message)}</p>
-          <a class="btn btn-secondary" href="${esc(returnUrl)}">${Icons.arrowLeft} 返回我的短链接</a>
-        </div>
-      </div>`;
-  }
-}
-
-// -- list page --
-function skeletonList() {
-  return `
-    <div class="card fade-in" style="padding-top:20px">
-      ${Array.from({length: 5}, () => `
-        <div style="display:flex;align-items:center;gap:12px;padding:12px 0;border-bottom:1px solid var(--color-border)">
-          <div class="skeleton" style="width:80px;height:12px;border-radius:4px"></div>
-          <div class="skeleton" style="flex:1;height:12px;border-radius:4px"></div>
-          <div class="skeleton" style="width:48px;height:12px;border-radius:4px"></div>
-        </div>
-      `).join('')}
-    </div>
-  `;
-}
-
-async function renderList(ns) {
-  app.innerHTML = `
-    <div class="logo">${Icons.link}<span>${esc(ns)} 的短链接</span></div>
-    ${skeletonList()}
-  `;
-
-  try {
-    const PER_PAGE = 20;
-    let allApiItems = [];
-    let allApiIds = new Set();
-    let currentPage = 0;
-    let hasMore = true;
-    let merged = [];
-
-    let selected = new Set();
-    let batchConfirming = false;
-
-    const searchIcon = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>`;
-
-    function rebuildMerged() {
-      const optiDeletes = new Set(loadOptiDeletes());
-      const optiCreates = loadOptiCreates().filter(c => !allApiIds.has(c.id));
-      merged = [...optiCreates.map(c => ({ id: c.id, desc: c.desc, date: c.date.slice(0, 10) })),
-                ...allApiItems.filter(d => !optiDeletes.has(d.id))];
-      cleanOptiState(allApiIds);
-    }
-
-    function renderListItems(filterText) {
-      const q = (filterText || '').toLowerCase();
-      const filtered = q ? merged.filter(d => d.desc.toLowerCase().includes(q)) : merged;
-      if (!filtered.length) {
-        return `<div class="empty-state" style="padding:24px 4px"><p>没有匹配 "${esc(q)}" 的短链接</p></div>`;
-      }
-      let h = `<ul class="shortlist">`;
-      filtered.forEach(g => {
-        const preview = g.desc || '(空)';
-        const vc = getViewCount(g.id);
-        const vBadge = vc ? `<span class="view-badge" title="访问 ${vc} 次">👁 ${vc}</span>` : '';
-        h += `
-          <li>
-            <label class="list-check" data-id="${esc(g.id)}">
-              <input type="checkbox" data-id="${esc(g.id)}" ${selected.has(g.id) ? 'checked' : ''}>
-              <span class="checkmark"></span>
-            </label>
-            <span class="code">${esc(g.id).slice(0, 8)}</span>
-            <div class="shortlist-info">
-              <span class="preview-text">${esc(preview)}</span>
-              <span class="date">${vBadge}${esc(g.date)}</span>
-            </div>
-            <a class="btn-sm" href="?s=${esc(g.id)}&amp;user=${encodeURIComponent(ns)}" style="text-decoration:none;flex-shrink:0">查看 ${Icons.externalLink}</a>
-          </li>`;
-      });
-      h += `</ul>`;
-      h += `<p class="dim spacer-sm">${filtered.length} / ${merged.length} 条</p>`;
-      return h;
-    }
-
-    function updateBatchBar() {
-      const bar = $('#batch-bar');
-      if (!bar) return;
-      const delBtn = $('#batch-delete-btn');
-      const confBtn = $('#batch-confirm-btn');
-      const cancBtn = $('#batch-cancel-btn');
-      const count = $('#batch-count');
-      if (batchConfirming && selected.size) {
-        bar.style.display = 'flex';
-        count.textContent = `确认删除 ${selected.size} 项？`;
-        delBtn.style.display = 'none';
-        confBtn.style.display = '';
-        cancBtn.style.display = '';
-      } else if (selected.size) {
-        bar.style.display = 'flex';
-        count.textContent = `已选 ${selected.size} 项`;
-        delBtn.style.display = '';
-        confBtn.style.display = 'none';
-        cancBtn.style.display = 'none';
-      } else {
-        bar.style.display = 'none';
-        batchConfirming = false;
-      }
-    }
-
-    function buildHtml() {
-      let html = `
-        <div class="logo">${Icons.link}<span>${esc(ns)} 的短链接</span></div>
-        <div class="card fade-in">
-          <div class="search-bar">
-            ${searchIcon}
-            <input type="search" id="list-search" class="search-input" placeholder="搜索 ${merged.length} 条短链接..." autocomplete="off">
-          </div>
-          <div class="batch-bar" id="batch-bar" style="display:none">
-            <span class="batch-count" id="batch-count"></span>
-            <button class="btn-sm" id="batch-delete-btn" style="color:var(--color-danger)">${Icons.trash} 批量删除</button>
-            <button class="btn-sm btn-danger-solid" id="batch-confirm-btn" style="display:none">确认删除</button>
-            <button class="btn-sm" id="batch-cancel-btn" style="display:none">取消</button>
-          </div>
-          <div id="list-items">${renderListItems('')}</div>
-          ${hasMore ? `<div class="spacer" style="text-align:center"><button class="btn btn-secondary" id="load-more-btn" style="width:100%">加载更多 (${merged.length} / ?)</button></div>` : `<p class="dim spacer" style="text-align:center">共 ${merged.length} 条</p>`}
-        </div>
-        <div class="spacer"><a class="link" href=".">${Icons.arrowLeft} 创建新的</a></div>`;
-      return html;
-    }
-
-    function bindEvents() {
-      updateBatchBar();
-
-      $('#list-items').addEventListener('change', e => {
-        if (e.target.type === 'checkbox' && e.target.dataset.id) {
-          if (e.target.checked) selected.add(e.target.dataset.id);
-          else selected.delete(e.target.dataset.id);
-          updateBatchBar();
-        }
-      });
-
-      $('#batch-delete-btn').onclick = () => { batchConfirming = true; updateBatchBar(); };
-      $('#batch-cancel-btn').onclick = () => { batchConfirming = false; updateBatchBar(); };
-
-      $('#batch-confirm-btn').onclick = async () => {
-        const ids = [...selected];
-        const total = ids.length;
-        let deleted = 0;
-        for (const id of ids) {
-          try {
-            await sb(`shortlinks?id=eq.${encodeURIComponent(id)}`, 'DELETE');
-            addOptiDelete(id);
-            deleted++;
-          } catch (err) {
-            toast(`删除 ${id.slice(0, 8)} 失败`, Icons.alert);
-          }
-        }
-        if (deleted) toast(`已删除 ${deleted} / ${total} 项`, Icons.check);
-        selected.clear();
-        batchConfirming = false;
-        renderList(ns);
-      };
-
-      $('#list-search').oninput = function() {
-        $('#list-items').innerHTML = renderListItems(this.value);
-      };
-
-      const loadMore = $('#load-more-btn');
-      if (loadMore) loadMore.onclick = () => loadNextPage();
-    }
-
-    async function loadNextPage() {
-      const btn = $('#load-more-btn');
-      if (btn) { btn.disabled = true; btn.innerHTML = `<span class="spinner"></span> 加载中...`; }
-
-      currentPage++;
-      const from = (currentPage - 1) * PER_PAGE;
-      const to = from + PER_PAGE - 1;
-
-      const items = await sb(`shortlinks?select=*&namespace=eq.${encodeURIComponent(ns)}&order=created_at.desc&limit=${PER_PAGE}&offset=${from}`, 'GET');
-
-      hasMore = (items || []).length === PER_PAGE;
-
-      for (const item of (items || [])) {
-        allApiIds.add(item.id);
-        allApiItems.push({
-          id: item.id,
-          desc: item.description || '',
-          date: item.created_at ? item.created_at.slice(0, 10) : ''
-        });
-      }
-      rebuildMerged();
-
-      if (!merged.length && currentPage === 1) {
-        app.innerHTML = `
-          <div class="logo">${Icons.link}<span>${esc(ns)} 的短链接</span></div>
-          <div class="card fade-in">
-            <div class="empty-state">
-              ${Icons.folder}
-              <p>还没有创建过短链接</p>
-              <a class="btn btn-secondary" href=".">${Icons.arrowLeft} 创建新的</a>
-            </div>
-          </div>`;
-        return;
-      }
-
-      app.innerHTML = buildHtml();
-      bindEvents();
-    }
-
-    await loadNextPage();
-  } catch (err) {
-    app.innerHTML = `
-      <div class="card fade-in">
-        <div class="empty-state">
-          ${Icons.alert}
-          <p>${esc(err.message)}</p>
-          <a class="btn btn-secondary" href=".">${Icons.arrowLeft} 返回</a>
-        </div>
-      </div>`;
-  }
 }
 
 // -- settings page --
@@ -1383,7 +445,7 @@ function saveConnection() {
     localStorage.setItem('sb_url', config.url);
     localStorage.setItem('sb_anon_key', config.key);
     localStorage.setItem('sb_namespace', config.ns);
-    location.reload();
+    location.href = location.pathname + '?page=settings';
   } catch (error) { toast(error.message, Icons.alert); }
 }
 
@@ -1449,21 +511,22 @@ function renderSettings() {
           <input id="sb-ns-input" type="text" required value="${esc(namespace)}" autocomplete="off">
           <div class="flex spacer-sm connection-actions">
             <button type="button" class="btn btn-secondary btn-sm" id="test-connection">${Icons.database} 测试连接</button>
-            <button type="submit" class="btn btn-primary btn-sm">${Icons.check} 保存连接</button>
+            <button type="submit" class="btn btn-primary btn-sm">${Icons.check} 仅切换连接</button>
           </div>
           <p id="connection-status" class="muted spacer-sm" role="status"></p>
-          <p class="dim spacer-sm">配置保存在当前浏览器。切换项目后，原有短链接内容需要单独迁移。</p>
+          <p class="dim spacer-sm">仅切换连接只影响当前浏览器。迁移全部内容、恢复备份和更新旧链接，请使用下方「备份与迁移」。</p>
           <a class="link spacer-sm migration-download" href="migration.sql" download>${Icons.download} 下载初始化 SQL</a>
         </form>
       </section>
       <section class="card settings-section data-card">
-        <div><p class="eyebrow">03 / LOCAL DATA</p><h2>本地数据</h2><p class="dim">清除浏览器中保存的连接与偏好设置。</p></div>
+        <div><p class="eyebrow">03 / LOCAL DATA</p><h2>本地数据</h2><p class="dim">重置当前浏览器的连接、空间名和主题。草稿仍保留，可在对应空间的编辑页管理。</p></div>
         <div class="data-actions">
         <button class="btn-sm" id="clear-data-btn" style="color:var(--color-danger)">
-          ${Icons.alert} 清除全部本地数据
+          ${Icons.alert} 重置连接与外观
         </button>
         </div>
       </section>
+      <section class="card settings-section" id="portability-settings"></section>
       <p class="settings-about">shortlink v${APP_VERSION} · 少一点步骤，多一点分享。</p>
     </div>
     </div>
@@ -1513,6 +576,8 @@ function renderSettings() {
     } finally { button.disabled = false; }
   };
 
+  renderPortabilitySettings();
+
   // theme switch
   $$('.theme-card').forEach(card => {
     card.onclick = () => {
@@ -1524,8 +589,8 @@ function renderSettings() {
   $('#clear-data-btn').onclick = () => {
     const btn = $('#clear-data-btn');
     if (btn._confirming) {
-      localStorage.clear();
-      location.reload();
+      ['sb_url','sb_anon_key','sb_namespace','theme'].forEach(key => localStorage.removeItem(key));
+      location.href = location.pathname + '?page=settings';
       return;
     }
     btn._confirming = true;
@@ -1539,7 +604,7 @@ function renderSettings() {
       ev.stopPropagation();
       btn._confirming = false;
       btn.classList.remove('btn-danger-solid');
-      btn.innerHTML = `${Icons.alert} 清除全部本地数据`;
+      btn.innerHTML = `${Icons.alert} 重置连接与外观`;
       cancel.remove();
     };
     btn.parentNode.insertBefore(cancel, btn.nextSibling);
@@ -1556,7 +621,21 @@ applyTheme(getTheme());
 window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
   if (getTheme() === 'auto') applyTheme('auto');
 });
-render();
+let connection;
+document.addEventListener('DOMContentLoaded', async () => {
+  app.innerHTML = '<div class="card"><p role="status">正在连接你的空间…</p></div>';
+  try {
+    connection = await ShortlinkPortability.resolve({url:SUPABASE_URL,key:SUPABASE_ANON_KEY});
+    SUPABASE_URL = connection.url; SUPABASE_ANON_KEY = connection.key;
+    configured = !!(SUPABASE_URL && SUPABASE_ANON_KEY);
+    ShortlinkTransfers.configure(connection); ShortlinkData.configure(connection);
+    await render();
+    if (connection.registryWarning) notice(connection.registryWarning);
+  } catch (error) {
+    app.innerHTML = `<div class="card"><h2>连接配置读取失败</h2><p>${esc(error.message)}</p><button class="btn-sm" id="retry-startup">重新读取</button></div>`;
+    $('#retry-startup').onclick = () => location.reload();
+  }
+});
 
 document.addEventListener('keydown', e => {
   if (e.key !== 'Escape') return;
