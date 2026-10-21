@@ -166,8 +166,13 @@ async function renderEditor(record) {
       const wrap = document.createElement('div'); wrap.className = 'wrap';
       const button = document.createElement('button'); button.className = 'preview-open'; button.type = 'button';
       button.setAttribute('aria-label', `预览 ${info.name}`);
-      const img = document.createElement('img'); img.src = safeMediaUrl(info.thumbnail || info.url); img.alt = info.name;
-      button.append(img); button.onclick = () => openImageViewer([info], 0);
+      if (info.thumbnail || info.url) {
+        const img = document.createElement('img'); img.src = safeMediaUrl(info.thumbnail || info.url); img.alt = info.name;
+        button.append(img);
+      } else {
+        const placeholder=document.createElement('span');placeholder.className='original-placeholder';placeholder.textContent='查看原图';button.append(placeholder);
+      }
+      button.onclick = () => openImageViewer([info], 0);
       const del = document.createElement('button'); del.className = 'del'; del.type = 'button'; del.innerHTML = Icons.close;
       del.setAttribute('aria-label', `移除 ${info.name}`); del.onclick = () => { remove(); renderQueues(); changed(); };
       wrap.append(button, del); preview.append(wrap);
