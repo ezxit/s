@@ -255,6 +255,16 @@ test('desktop-site touch devices skip the save picker too', async () => {
   assert.equal(state.links[0].download, file.name);
 });
 
+test('app downloads can force the browser manager even when a save picker exists', async () => {
+  const { api, state } = fixture({ fileWriter: true });
+  const file = installManifest(state, 5);
+  file.name = '强制浏览器下载.apk';
+  await api.download(file, { useSavePicker: false });
+  assert.equal(state.suggestedName, undefined);
+  assert.equal(state.writes.length, 0);
+  assert.equal(state.links[0].download, file.name);
+});
+
 test('corrupted or missing download parts stop reconstruction and abort partial disk file', async () => {
   const { api, state } = fixture({ fileWriter: true });
   const file = installManifest(state);

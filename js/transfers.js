@@ -31,7 +31,7 @@
     const narrowTouchViewport = touchSurface && viewportWidth > 0 && viewportWidth <= 900;
     return nav.userAgentData?.mobile === true || /Android|iPhone|iPad|iPod|Mobile/i.test(`${userAgent} ${platform}`) || (/Macintosh/i.test(userAgent) && touchPoints > 1) || narrowTouchViewport;
   }
-  function canUseSavePicker() { return !isMobileBrowser() && typeof global.showSaveFilePicker === 'function'; }
+  function canUseSavePicker(options = {}) { return options.useSavePicker !== false && !isMobileBrowser() && typeof global.showSaveFilePicker === 'function'; }
 
   function abortError() { return new DOMException('传输已暂停，已上传部分可继续使用。', 'AbortError'); }
   function checkAbort(signal) { if (signal?.aborted) throw abortError(); }
@@ -451,7 +451,7 @@
         // Call the picker while user activation is still available. Verified
         // parts are written sequentially; browsers without this API get one
         // correctly named Blob, never a concatenated 200 MiB ArrayBuffer.
-        const handle = canUseSavePicker() ? await global.showSaveFilePicker({ suggestedName: name }) : null;
+        const handle = canUseSavePicker(options) ? await global.showSaveFilePicker({ suggestedName: name }) : null;
         checkAbort(options.signal);
         const writer = handle ? await handle.createWritable() : null;
         const pieces = [];
@@ -483,7 +483,7 @@
       if (!['https:', 'http:'].includes(url.protocol)) throw new Error('下载地址格式有误。');
       // Legacy external links can use the browser's streaming file writer. The
       // picker runs immediately in the click gesture, before any network awaits.
-      const writerHandle = file.size > SMALL_DOWNLOAD_LIMIT && canUseSavePicker()
+      const writerHandle = file.size > SMALL_DOWNLOAD_LIMIT && canUseSavePicker(options)
         ? await global.showSaveFilePicker({ suggestedName: name }) : null;
       if (file.size > SMALL_DOWNLOAD_LIMIT && !writerHandle) {
         clickDownload(url.href, name);
