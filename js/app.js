@@ -1,5 +1,5 @@
 // --- config ---
-const APP_VERSION = '1.5.0';
+const APP_VERSION = '1.5.1';
 let SUPABASE_URL = ('https://vhifkvzmujbhcdwjixdj.supabase.co').replace(/\/+$/, '');
 let SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZoaWZrdnptdWpiaGNkd2ppeGRqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE0ODgzOTYsImV4cCI6MjA5NzA2NDM5Nn0.nZ7zBk3p_Fh5Q88makO5OmHJFCJ2uG_0inIZ8kmq-zc';
 let configured = !!(SUPABASE_URL && SUPABASE_ANON_KEY);
@@ -206,7 +206,6 @@ const activeDownloadControllers = new Set();
 async function downloadAttachment(file, control) {
   if (control?.dataset.downloading === 'true') return;
   const controller = new AbortController();
-  activeDownloadControllers.add(controller);
   const panel = document.createElement('div');
   panel.className = 'download-progress'; panel.hidden = true;
   panel.innerHTML = `<span class="download-name">${esc(file.name || '文件')}</span><progress max="100" value="0"></progress><span class="download-status" role="status"></span><button type="button" class="btn-sm">取消下载</button>`;
@@ -215,7 +214,9 @@ async function downloadAttachment(file, control) {
   cancel.onclick = () => controller.abort();
   try {
     await ShortlinkTransfers.download(file, {control,signal:controller.signal,onStatus: status => {
-      if (status.phase === 'delegated') { toast(status.message, Icons.download); return; }
+      if (status.phase === 'delegated') { activeDownloadControllers.delete(controller); toast(status.message, Icons.download); return; }
+      if (status.phase === 'complete') activeDownloadControllers.delete(controller);
+      else activeDownloadControllers.add(controller);
       panel.hidden = false;
       panel.querySelector('.download-status').textContent = status.total ? `${status.message} ${formatSize(status.loaded)} / ${formatSize(status.total)}` : status.message;
       panel.querySelector('progress').value = status.total ? status.loaded * 100 / status.total : 0;
@@ -253,7 +254,7 @@ function openImageViewer(images, startIndex) {
         <button type="button" class="btn-sm" data-actual title="原始大小" aria-label="原始大小">1:1</button>
       </div>
       <div class="image-viewer-actions">
-        <button type="button" class="btn-sm" data-download title="下载图片" aria-label="下载图片">${Icons.download}</button>
+        <button type="button" class="btn-sm" data-download title="下载原图" aria-label="下载原图">${Icons.download}</button>
         <button type="button" class="btn-sm" data-close title="关闭" aria-label="关闭图片预览">${Icons.close}</button>
       </div>
     </div>

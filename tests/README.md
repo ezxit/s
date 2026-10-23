@@ -32,6 +32,8 @@ npx.cmd --yes --package @playwright/cli playwright-cli -s=shortlink-qa run-code 
 npx.cmd --yes --package @playwright/cli playwright-cli -s=shortlink-qa eval "window.__workspaceEdgeQA"
 npx.cmd --yes --package @playwright/cli playwright-cli -s=shortlink-qa run-code --filename=tests/workspace-segment-browser.js
 npx.cmd --yes --package @playwright/cli playwright-cli -s=shortlink-qa eval "window.__workspaceSegmentQA"
+npx.cmd --yes --package @playwright/cli playwright-cli -s=shortlink-qa run-code --filename=tests/image-download-browser.js
+npx.cmd --yes --package @playwright/cli playwright-cli -s=shortlink-qa eval "window.__imageDownloadQA"
 npx.cmd --yes --package @playwright/cli playwright-cli -s=shortlink-qa close
 ```
 

@@ -117,7 +117,7 @@ async page => {
   await page.locator('#search-input').fill('记录');await page.waitForFunction(()=>document.querySelector('#search-status')?.textContent.includes('47 条'));
   await page.locator('#next-page').click();await page.waitForFunction(()=>document.querySelector('#page-status')?.textContent==='2 / 3');
   check(await page.locator('#search-input').inputValue()==='记录','pagination preserves search query');
-  await page.goto(link);await page.locator('#delete-link').click();await page.locator('#restore-link').waitFor();
+  await page.goto(link);await page.locator('#delete-link').click();await page.getByRole('button',{name:'撤销',exact:true}).waitFor();
   check(!!created.deleted_at&&objects.has(created.images[0].key),'soft delete keeps storage objects');
   await page.getByRole('button',{name:'撤销',exact:true}).click();await page.locator('#edit-btn').waitFor();
   check(!created.deleted_at,'undo restores published content');

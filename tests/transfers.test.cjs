@@ -57,6 +57,7 @@ function fixture(options = {}) {
     Blob, File, URL: TestURL, DOMException, AbortController, TextEncoder, btoa, fetch, crypto: webcrypto,
     XMLHttpRequest: XHR, location: { href: 'https://shortlink.example/' },
     setTimeout: callback => { queueMicrotask(callback); return 1; }, clearTimeout() {},
+    navigator: options.navigator || (options.mobile ? { userAgent: 'Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 Chrome/130.0 Mobile Safari/537.36', userAgentData: { mobile: true }, maxTouchPoints: 5 } : { userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/130.0 Safari/537.36', userAgentData: { mobile: false }, maxTouchPoints: 0 }),
     document: { body: { appendChild() {} }, createElement() { return { style: {}, click() { state.links.push({ href: this.href, download: this.download }); }, remove() {} }; } },
   });
   if (options.fileWriter) context.showSaveFilePicker = async ({ suggestedName }) => {
@@ -216,6 +217,21 @@ test('segmented download fallback creates a single Chinese-named original Blob',
   assert.equal(state.createdBlobs.length, 1);
   assert.equal(state.createdBlobs[0].size, file.size);
   assert.equal(state.createdBlobs[0].type, 'application/zip');
+  assert.equal(state.links[0].download, file.name);
+});
+
+test('mobile segmented downloads skip the save picker and use the browser download manager', async () => {
+  const { api, state } = fixture({
+    fileWriter: true,
+    navigator: { userAgent: 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 Chrome/130.0.0.0 Mobile Safari/537.36' },
+  });
+  const file = installManifest(state, 5);
+  file.name = '手机原图.png';
+  file.type = 'image/png';
+  await api.download(file);
+  assert.equal(state.suggestedName, undefined);
+  assert.equal(state.writes.length, 0);
+  assert.equal(state.links.length, 1);
   assert.equal(state.links[0].download, file.name);
 });
 

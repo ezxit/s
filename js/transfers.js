@@ -11,6 +11,17 @@
   const SMALL_DOWNLOAD_LIMIT = 24 * 1024 * 1024;
   let configured;
 
+  // Mobile Chrome can expose the File System Access API, but opening its
+  // picker makes a normal download feel like a folder-selection workflow.
+  // Keep the picker for desktop large-file streaming only; mobile should use
+  // the browser's regular download manager.
+  function isMobileBrowser() {
+    const nav = typeof navigator === 'object' ? navigator : {};
+    const userAgent = nav.userAgent || '';
+    return nav.userAgentData?.mobile === true || /Android|iPhone|iPad|iPod|Mobile/i.test(userAgent) || (/Macintosh/i.test(userAgent) && nav.maxTouchPoints > 1);
+  }
+  function canUseSavePicker() { return !isMobileBrowser() && typeof global.showSaveFilePicker === 'function'; }
+
   function abortError() { return new DOMException('传输已暂停，已上传部分可继续使用。', 'AbortError'); }
   function checkAbort(signal) { if (signal?.aborted) throw abortError(); }
   function configuration(override) {
@@ -429,7 +440,7 @@
         // Call the picker while user activation is still available. Verified
         // parts are written sequentially; browsers without this API get one
         // correctly named Blob, never a concatenated 200 MiB ArrayBuffer.
-        const handle = global.showSaveFilePicker ? await global.showSaveFilePicker({ suggestedName: name }) : null;
+        const handle = canUseSavePicker() ? await global.showSaveFilePicker({ suggestedName: name }) : null;
         checkAbort(options.signal);
         const writer = handle ? await handle.createWritable() : null;
         const pieces = [];
@@ -461,7 +472,7 @@
       if (!['https:', 'http:'].includes(url.protocol)) throw new Error('下载地址格式有误。');
       // Legacy external links can use the browser's streaming file writer. The
       // picker runs immediately in the click gesture, before any network awaits.
-      const writerHandle = file.size > SMALL_DOWNLOAD_LIMIT && global.showSaveFilePicker
+      const writerHandle = file.size > SMALL_DOWNLOAD_LIMIT && canUseSavePicker()
         ? await global.showSaveFilePicker({ suggestedName: name }) : null;
       if (file.size > SMALL_DOWNLOAD_LIMIT && !writerHandle) {
         clickDownload(url.href, name);
