@@ -11,6 +11,18 @@
   const URL_FIELDS = { url: 'key', originalUrl: 'originalKey', thumbnailUrl: 'thumbnailKey', thumbUrl: 'thumbKey', previewUrl: 'previewKey' };
   const WRITABLE = ['id', 'text', 'images', 'files', 'description', 'namespace', 'created', 'created_at', 'updated_at', 'deleted_at', 'retired_assets'];
   const TOKEN = 'slbackup-asset:';
+  function isMobileBrowser() {
+    const nav = typeof navigator === 'object' ? navigator : {};
+    const userAgent = nav.userAgent || '';
+    const platform = nav.userAgentData?.platform || nav.platform || '';
+    const touchPoints = Number(nav.maxTouchPoints) || 0;
+    const coarsePointer = typeof window.matchMedia === 'function' && (window.matchMedia('(pointer: coarse)').matches || window.matchMedia('(hover: none)').matches);
+    const touchSurface = touchPoints > 0 || coarsePointer || ('ontouchstart' in window);
+    const viewportWidth = Number(window.innerWidth || window.screen?.width || 0);
+    const narrowTouchViewport = touchSurface && viewportWidth > 0 && viewportWidth <= 900;
+    return nav.userAgentData?.mobile === true || /Android|iPhone|iPad|iPod|Mobile/i.test(`${userAgent} ${platform}`) || (/Macintosh/i.test(userAgent) && touchPoints > 1) || narrowTouchViewport;
+  }
+  function canUseSavePicker() { return !isMobileBrowser() && typeof window.showSaveFilePicker === 'function'; }
   const abort = signal => { if (signal?.aborted) throw new DOMException('操作已取消；已完成的迁移进度保留。', 'AbortError'); };
   const progress = (opts, phase, done, total, message) => opts.onProgress?.({ phase, done, total, message });
   const b64url = value => btoa(String.fromCharCode(...encoder.encode(JSON.stringify(value)))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -243,7 +255,7 @@
     const chunks = [];
     let archiveSize = 0;
     // Open the save picker before the first network await to preserve user activation.
-    if (opts.saveAs !== false && window.showSaveFilePicker) {
+    if (opts.saveAs !== false && canUseSavePicker()) {
       const handle = await window.showSaveFilePicker({ suggestedName: filename, types: [{ description: 'Shortlink 完整备份', accept: { 'application/octet-stream': ['.slbackup'] } }] });
       writer = await handle.createWritable();
     }

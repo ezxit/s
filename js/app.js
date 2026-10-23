@@ -1,5 +1,5 @@
 // --- config ---
-const APP_VERSION = '1.5.1';
+const APP_VERSION = '1.5.2';
 let SUPABASE_URL = ('https://vhifkvzmujbhcdwjixdj.supabase.co').replace(/\/+$/, '');
 let SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZoaWZrdnptdWpiaGNkd2ppeGRqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODE0ODgzOTYsImV4cCI6MjA5NzA2NDM5Nn0.nZ7zBk3p_Fh5Q88makO5OmHJFCJ2uG_0inIZ8kmq-zc';
 let configured = !!(SUPABASE_URL && SUPABASE_ANON_KEY);

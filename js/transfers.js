@@ -18,7 +18,18 @@
   function isMobileBrowser() {
     const nav = typeof navigator === 'object' ? navigator : {};
     const userAgent = nav.userAgent || '';
-    return nav.userAgentData?.mobile === true || /Android|iPhone|iPad|iPod|Mobile/i.test(userAgent) || (/Macintosh/i.test(userAgent) && nav.maxTouchPoints > 1);
+    const platform = nav.userAgentData?.platform || nav.platform || '';
+    const touchPoints = Number(nav.maxTouchPoints) || 0;
+    const coarsePointer = typeof global.matchMedia === 'function' && (
+      global.matchMedia('(pointer: coarse)').matches || global.matchMedia('(hover: none)').matches
+    );
+    const touchSurface = touchPoints > 0 || coarsePointer || ('ontouchstart' in global);
+    // Chrome's "Desktop site" mode can report Windows/macOS while retaining
+    // the phone's touch surface. A narrow touch viewport is the final fallback
+    // for browsers that hide both UA and pointer hints.
+    const viewportWidth = Number(global.innerWidth || global.screen?.width || 0);
+    const narrowTouchViewport = touchSurface && viewportWidth > 0 && viewportWidth <= 900;
+    return nav.userAgentData?.mobile === true || /Android|iPhone|iPad|iPod|Mobile/i.test(`${userAgent} ${platform}`) || (/Macintosh/i.test(userAgent) && touchPoints > 1) || narrowTouchViewport;
   }
   function canUseSavePicker() { return !isMobileBrowser() && typeof global.showSaveFilePicker === 'function'; }
 

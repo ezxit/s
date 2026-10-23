@@ -58,6 +58,9 @@ function fixture(options = {}) {
     XMLHttpRequest: XHR, location: { href: 'https://shortlink.example/' },
     setTimeout: callback => { queueMicrotask(callback); return 1; }, clearTimeout() {},
     navigator: options.navigator || (options.mobile ? { userAgent: 'Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 Chrome/130.0 Mobile Safari/537.36', userAgentData: { mobile: true }, maxTouchPoints: 5 } : { userAgent: 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/130.0 Safari/537.36', userAgentData: { mobile: false }, maxTouchPoints: 0 }),
+    innerWidth: options.innerWidth || 1280,
+    screen: { width: options.screenWidth || options.innerWidth || 1280 },
+    matchMedia: query => ({ matches: options.coarsePointer === true && (query === '(pointer: coarse)' || query === '(hover: none)') }),
     document: { body: { appendChild() {} }, createElement() { return { style: {}, click() { state.links.push({ href: this.href, download: this.download }); }, remove() {} }; } },
   });
   if (options.fileWriter) context.showSaveFilePicker = async ({ suggestedName }) => {
@@ -227,6 +230,23 @@ test('mobile segmented downloads skip the save picker and use the browser downlo
   });
   const file = installManifest(state, 5);
   file.name = '手机原图.png';
+  file.type = 'image/png';
+  await api.download(file);
+  assert.equal(state.suggestedName, undefined);
+  assert.equal(state.writes.length, 0);
+  assert.equal(state.links.length, 1);
+  assert.equal(state.links[0].download, file.name);
+});
+
+test('desktop-site touch devices skip the save picker too', async () => {
+  const { api, state } = fixture({
+    fileWriter: true,
+    innerWidth: 412,
+    navigator: { userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/130.0.0.0 Safari/537.36', maxTouchPoints: 5 },
+    coarsePointer: true,
+  });
+  const file = installManifest(state, 5);
+  file.name = '桌面版网站手机原图.png';
   file.type = 'image/png';
   await api.download(file);
   assert.equal(state.suggestedName, undefined);
